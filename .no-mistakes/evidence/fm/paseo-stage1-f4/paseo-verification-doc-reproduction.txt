@@ -1,0 +1,36 @@
+===============================================================================
+ Reproducing the OBSERVED evidence recorded in the new
+ docs/verification/runtime-backends.md '## paseo' section, verbatim, on this
+ host at 2026-09-07T00:37:15Z.
+ That file is this repo's owned record of repeatable evidence behind an
+ active guarantee, so re-running its own commands is the check that it is
+ accurate rather than aspirational.
+===============================================================================
+
+--- doc claim: 'the Paseo CLI is not on PATH and is reached inside the app
+--- bundle', with Paseo 0.7.2 installed ---
+$ command -v paseo; echo "exit=$?"
+$ /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Paseo.app/Contents/Info.plist
+exit=1
+0.7.2
+    doc records: exit=1 / 0.7.2      MATCHES
+
+--- doc claim: resolved detection ordering against the shipped code ---
+$ env -i PATH="$PATH" HOME="$HOME" TMUX=/tmp/x,1,0 PASEO_AGENT_ID=a \
+    bash -c '. bin/fm-backend.sh; fm_backend_detect; echo " signal=$FM_BACKEND_DETECT_SIGNAL"'
+  tmux signal=TMUX
+$ env -i PATH="$PATH" HOME="$HOME" PASEO_AGENT_ID=a \
+    bash -c '. bin/fm-backend.sh; fm_backend_detect; echo " signal=$FM_BACKEND_DETECT_SIGNAL"'
+  paseo signal=PASEO_AGENT_ID
+$ env -i PATH="$PATH" HOME="$HOME" PASEO_TERMINAL_ID=t \
+    bash -c '. bin/fm-backend.sh; fm_backend_detect; echo " signal=$FM_BACKEND_DETECT_SIGNAL"'
+  paseo signal=PASEO_TERMINAL_ID
+$ env -i PATH="$PATH" HOME="$HOME" CMUX_WORKSPACE_ID=w PASEO_AGENT_ID=a \
+    bash -c '. bin/fm-backend.sh; fm_backend_detect; echo " signal=$FM_BACKEND_DETECT_SIGNAL"'
+  cmux signal=CMUX_WORKSPACE_ID
+
+    doc records, in order:
+      tmux signal=TMUX
+      paseo signal=PASEO_AGENT_ID
+      paseo signal=PASEO_TERMINAL_ID
+      cmux signal=CMUX_WORKSPACE_ID    MATCHES
