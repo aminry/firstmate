@@ -1,0 +1,158 @@
+
+==================================================================
+1. A captain whose firstmate runs as a Paseo agent tries to spawn a task
+==================================================================
+
+$ PASEO_AGENT_ID=agt_9f2c41d0 bin/fm-spawn.sh paseo-demo firstmate claude --mode no-mistakes --yolo off
+NOTICE: auto-detected paseo runtime (PASEO_AGENT_ID) - the EXPERIMENTAL paseo backend has no lifecycle adapter yet, so every spawn refuses. Set config/backend or pass --backend tmux to select a spawn-capable backend.
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+[exit 1]
+
+-- task records left behind in the fleet state dir: 0 --
+
+==================================================================
+2. Same host, a Paseo TERMINAL rather than an agent session
+==================================================================
+
+$ PASEO_TERMINAL_ID=11111111-2222-3333-4444-555555555555 bin/fm-spawn.sh paseo-demo firstmate claude --mode no-mistakes --yolo off
+NOTICE: auto-detected paseo runtime (PASEO_TERMINAL_ID) - the EXPERIMENTAL paseo backend has no lifecycle adapter yet, so every spawn refuses. Set config/backend or pass --backend tmux to select a spawn-capable backend.
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+[exit 1]
+
+==================================================================
+3. Asking for paseo explicitly refuses at the same shared boundary
+==================================================================
+
+$ bin/fm-spawn.sh sm-demo --secondmate --backend paseo
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+[exit 1]
+
+-- task records left behind: 0 --
+
+==================================================================
+4. The opt-out the notice tells the captain to use
+==================================================================
+
+$ PASEO_AGENT_ID=agt_9f2c41d0 bin/fm-spawn.sh paseo-demo firstmate claude --mode no-mistakes --yolo off --backend tmux
+bin/fm-spawn.sh: line 2158: cd: firstmate: No such file or directory
+(the paseo notice and the paseo refusal are both gone; the run proceeds past
+ the backend boundary and stops on this sandbox having no such project)
+
+
+$ echo tmux > $FM_CONFIG/backend   # the durable form of the same opt-out
+bin/fm-spawn.sh: line 2158: cd: firstmate: No such file or directory
+(silent: an explicitly pinned backend wins over auto-detection with no notice)
+
+==================================================================
+5a. BEFORE (bin/fm-backend.sh at 119d0a3): teardown reports COMPLETE over a live Paseo terminal
+==================================================================
+
+-- the durable task record, the only place the terminal identity lives --
+window=wks_c7e413f9c986b0f8:11111111-2222-3333-4444-555555555555
+endpoint_task_id=paseo-task
+worktree=/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-before/worktree
+project=/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-before/project
+kind=scout
+backend=paseo
+paseo_workspace_id=wks_c7e413f9c986b0f8
+paseo_terminal_id=11111111-2222-3333-4444-555555555555
+
+$ bin/fm-teardown.sh paseo-task --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown paseo-task complete (window wks_c7e413f9c986b0f8:11111111-2222-3333-4444-555555555555, worktree /var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-before/worktree)
+Backlog: paseo-task just finished (this home keeps no backlog at /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/teardown-paseo-before/data/backlog.md). Update /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/teardown-paseo-before/data/backlog.md - move paseo-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+-- durable state after the command (the Paseo terminal is still running:
+   nothing in firstmate can kill it, fm_backend_kill has no paseo arm) --
+task record on disk       : DELETED
+paseo terminal identity   : GONE - the running terminal is now unreachable
+worktree still present    : yes
+runtime commands invoked  : treehouse <return> <--force> </var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-before/worktree>;
+
+==================================================================
+5b. AFTER: the same record refuses and every part of the task survives
+==================================================================
+
+-- the durable task record, the only place the terminal identity lives --
+window=wks_c7e413f9c986b0f8:11111111-2222-3333-4444-555555555555
+endpoint_task_id=paseo-task
+worktree=/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-after/worktree
+project=/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-paseo-after/project
+kind=scout
+backend=paseo
+paseo_workspace_id=wks_c7e413f9c986b0f8
+paseo_terminal_id=11111111-2222-3333-4444-555555555555
+
+$ bin/fm-teardown.sh paseo-task --force
+REFUSED: backend 'paseo' has no lifecycle adapter, so task paseo-task's endpoint cannot be closed; preserving task state.
+
+-- durable state after the command (the Paseo terminal is still running:
+   nothing in firstmate can kill it, fm_backend_kill has no paseo arm) --
+task record on disk       : preserved
+paseo terminal identity   : 11111111-2222-3333-4444-555555555555
+worktree still present    : yes
+runtime commands invoked  : none
+
+==================================================================
+6. A working backend still tears down (the refusal is not a blanket stop)
+==================================================================
+
+$ bin/fm-teardown.sh tmux-task --force   # same command, a tmux-backed record
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown tmux-task complete (window isolated:fm-tmux-task, worktree /var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-tmux/worktree)
+Backlog: tmux-task just finished (this home keeps no backlog at /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/teardown-tmux/data/backlog.md). Update /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/teardown-tmux/data/backlog.md - move tmux-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+-- what teardown did --
+task record still on disk : no (cleaned up)
+runtime commands invoked  : treehouse <return> <--force> </var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/teardown-tmux/worktree>
+tmux <kill-window> <-t> <=isolated:=fm-tmux-task>
+
+==================================================================
+7a. BEFORE (bin/fm-backend.sh at 4e145be): a backend registered before its adapter FAILS OPEN
+==================================================================
+
+$ bin/fm-teardown.sh adapterless-task --force        # FM_BACKEND_KNOWN += notyetimplemented
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown adapterless-task complete (window isolated:fm-adapterless-task, worktree /var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/adapterless-before/worktree)
+Backlog: adapterless-task just finished (this home keeps no backlog at /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/adapterless-before/data/backlog.md). Update /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/paseo-e2e.TeeVNn/adapterless-before/data/backlog.md - move adapterless-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+-- durable state after the command --
+task record on disk       : DELETED - endpoint identity gone
+worktree return invoked   : YES - worktree handed back
+runtime commands invoked  : treehouse <return> <--force> </var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//paseo-e2e.TeeVNn/adapterless-before/worktree>;
+
+==================================================================
+7b. AFTER (commit c5d0607): the same record fails CLOSED at the shared cleanup boundary
+==================================================================
+
+$ bin/fm-teardown.sh adapterless-task --force        # FM_BACKEND_KNOWN += notyetimplemented
+REFUSED: backend 'notyetimplemented' has no lifecycle adapter, so task adapterless-task's endpoint cannot be closed; preserving task state.
+
+-- durable state after the command --
+task record on disk       : preserved
+worktree return invoked   : no
+runtime commands invoked  : none
+
+==================================================================
+8. Registry surface a captain sees when they typo the name
+==================================================================
+
+$ bin/fm-spawn.sh demo --secondmate --backend paseo-typo
+error: unknown backend 'paseo-typo' (known: tmux herdr zellij orca cmux paseo)
+[exit 1]
+
+
+==================================================================
+9. Session start on a Paseo host, and the backend tool delta
+==================================================================
+
+$ PASEO_AGENT_ID=agt_9f2c41d0 bin/fm-bootstrap.sh     # tmux NOT installed
+NOTICE: auto-detected paseo runtime (PASEO_AGENT_ID) - the EXPERIMENTAL paseo backend has no lifecycle adapter yet, so every spawn refuses. Set config/backend or pass --backend tmux to select a spawn-capable backend.
+(no "MISSING: tmux": paseo is session-provider-only, so tmux is not in its tool delta)
+
+$ bin/fm-bootstrap.sh                                  # same host, no Paseo marker
+MISSING: tmux (install: brew install tmux  # or the platform's package manager)
+(the default tmux home IS told, and gets no paseo notice - only the backend differed)
+
