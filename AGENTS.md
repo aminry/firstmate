@@ -597,6 +597,34 @@ Ambiguous scope or conflict still requires one concise clarification before acti
 Destructive, irreversible, security-sensitive, discard, and merge actions still require the captain to state that concrete action explicitly; once the captain does so and higher-priority instructions permit it, a conflicting Firstmate-written rule must not rigidly block the action.
 Standing `yolo` merge authority is not a substitute for a current explicit captain instruction where an explicit action is required.
 
+## Credential vault
+
+All NAS and service secrets live in an age-encrypted `.env.vault` at the home root.
+The age key is at `.secrets/firstmate-photo-key.txt`.
+Full reference: `data/vault-reference.md`.
+
+**Loading secrets:**
+```bash
+source bin/fm-load-vault.sh          # exports env vars into current shell
+bin/fm-load-vault.sh --check         # verify vault is decryptable, list key names
+```
+
+**Passing to crewmates:**
+Never paste secret values into brief text or steer messages.
+Load the vault before spawning, and pass secrets as environment variables via `--env-file`.
+Crewmates reference `$IMMICH_API_KEY`, `$TRUENAS_PASSWORD`, etc. — never the raw values.
+
+**NAS access:**
+SSH key at `.secrets/truenas_ed25519`, host `192.168.88.116`, user `truenas_admin`.
+Full access patterns (SSH, sudo, REST API, Immich, Nextcloud) are in `data/vault-reference.md` and `data/nas-access-reference.md`.
+
+**Hard rules:**
+- Never print, echo, or include secret values in chat, commits, briefs, or PR descriptions
+- Never commit `.env.vault`, `.secrets/`, or `.env.plaintext`
+- Never copy the age key outside `.secrets/`
+- If a secret may have leaked, report it to the captain immediately — rotation is the only fix
+- The restic backup password is irrecoverable — losing it means losing the B2 backup
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
