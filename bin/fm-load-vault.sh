@@ -56,8 +56,9 @@ trap 'rm -f "$TMPFILE"; if command -v shred &>/dev/null; then shred -u "$TMPFILE
 age -d -i "$AGE_KEY" "$VAULT_FILE" > "$TMPFILE"
 
 # Export all KEY=VALUE lines (skip comments and blanks)
+# Use 'export "$line"' directly to preserve special characters like # in values
 while IFS= read -r line; do
     if [[ "$line" =~ ^[A-Z_]+=.+ ]]; then
-        export "${line%%=*}=${line#*=}"
+        export "$line"
     fi
 done < "$TMPFILE"
