@@ -1,0 +1,107 @@
+PR 3884 - paseo registered as a known runtime backend name, safety boundary first
+Repo: firstmate    branch: fm/paseo-stage1-f4    head: 19029db
+Every command below is the real shipped CLI. No paseo binary is installed on this host.
+
+===============================================================
+A. A Paseo-hosted firstmate tries to spawn a task (nothing pinned in config)
+===============================================================
+
+$ PASEO_AGENT_ID=agt_9f2c4d1e bin/fm-spawn.sh demo-task <project> claude --mode no-mistakes --yolo off
+NOTICE: auto-detected paseo runtime (PASEO_AGENT_ID) - the EXPERIMENTAL paseo backend has no lifecycle adapter yet, so every spawn refuses. Set config/backend or pass --backend tmux to select a spawn-capable backend.
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit status: 1
+task records written: 0 (the refusal lands before any record)
+
+$ PASEO_TERMINAL_ID=<uuid> bin/fm-spawn.sh demo-task <project> claude --mode no-mistakes --yolo off
+NOTICE: auto-detected paseo runtime (PASEO_TERMINAL_ID) - the EXPERIMENTAL paseo backend has no lifecycle adapter yet, so every spawn refuses. Set config/backend or pass --backend tmux to select a spawn-capable backend.
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit status: 1
+
+===============================================================
+B. Asking for paseo explicitly - same refusal, same shared boundary
+===============================================================
+
+$ bin/fm-spawn.sh demo-task <project> claude --mode no-mistakes --yolo off --backend paseo
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit status: 1
+
+$ bin/fm-spawn.sh sm-demo --secondmate --backend paseo
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit status: 1
+
+===============================================================
+C. The misroute this ordering prevents: a tmux pane inside a Paseo host
+===============================================================
+Paseo leaks PASEO_AGENT_ID straight through a tmux spawn, so a tmux pane opened by a
+Paseo-hosted firstmate carries BOTH markers. $TMUX names the layer actually executing,
+so paseo is checked LAST and the tmux task is NOT rerouted (no notice, no refusal - the
+run gets past the backend boundary and stops later, here on a deliberately bad project path).
+
+$ TMUX=/tmp/tmux-501/default,12345,0 PASEO_AGENT_ID=agt_9f2c4d1e bin/fm-spawn.sh demo-task <bad-path> ...
+bin/fm-spawn.sh: line 2246: cd: /tmp/paseo-evidence.kKykHm/spawn-both/no-such-project: No such file or directory
+exit status: 1  <- backend resolved to tmux; no paseo notice and no paseo refusal
+
+===============================================================
+D. The documented opt-out: pin config/backend on the same Paseo host
+===============================================================
+
+$ echo tmux > config/backend; PASEO_AGENT_ID=agt_9f2c4d1e bin/fm-spawn.sh demo-task <bad-path> ...
+bin/fm-spawn.sh: line 2246: cd: /tmp/paseo-evidence.kKykHm/spawn-pinned/no-such-project: No such file or directory
+exit status: 1  <- explicit setting wins silently, no auto-detect notice
+
+===============================================================
+E. Teardown of a backend=paseo task (THE FIX): refuses, keeps every record
+===============================================================
+
+$ cat state/paseo-task.meta
+window=wks_abc:11111111-2222-3333-4444-555555555555
+endpoint_task_id=paseo-task
+worktree=/tmp/paseo-evidence.kKykHm/teardown-post/worktree
+project=/tmp/paseo-evidence.kKykHm/teardown-post/project
+backend=paseo
+kind=scout
+paseo_workspace_id=wks_abc
+paseo_terminal_id=11111111-2222-3333-4444-555555555555
+
+$ bin/fm-teardown.sh paseo-task --force
+REFUSED: backend 'paseo' has no lifecycle adapter, so task paseo-task's endpoint cannot be closed; preserving task state.
+exit status: 1
+
+state/ after the refusal:      paseo-task.meta 
+worktree after the refusal:   sentinel 
+runtime commands invoked:     (none - refused before any tmux/treehouse/paseo call)
+
+===============================================================
+F. The same teardown against the PRE-FIX code (commit ea3919b) - the defect
+===============================================================
+Pre-fix, fm_backend_validate_task_endpoint had an ACCEPTING per-field paseo arm while
+fm_backend_kill had no paseo arm, and every teardown kill call site swallows that failure.
+
+$ bin/fm-teardown.sh paseo-task --force   # with bin/fm-backend.sh from ea3919b
+teardown paseo-task complete (window wks_abc:11111111-2222-3333-4444-555555555555, worktree /tmp/paseo-evidence.kKykHm/teardown-pre/worktree)
+Backlog: paseo-task just finished (this home keeps no markdown backlog at /private/tmp/paseo-evidence.kKykHm/teardown-pre/home/data/backlog.md). Update /private/tmp/paseo-evidence.kKykHm/teardown-pre/home/data/backlog.md - move paseo-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit status: 0 (reported success)
+
+state/paseo-task.meta after:  GONE - the terminal identity was destroyed
+runtime commands invoked:     treehouse <return> <--force> </tmp/paseo-evidence.kKykHm/teardown-pre/worktree>
+                              ^ the worktree was handed back to treehouse and the record
+                                deleted, but the Paseo terminal was never killed - no kill
+                                command appears, because fm_backend_kill has no paseo arm
+                                and teardown swallows that failure.
+
+===============================================================
+G. Session start on a paseo home: treehouse is the whole tool delta
+===============================================================
+config/backend=paseo, and this PATH has NO tmux, NO jq and NO paseo binary - only treehouse.
+
+$ bin/fm-bootstrap.sh   # the session-start diagnostic every captain sees
+(no output above: silence means every dependency is satisfied - a paseo home is never told tmux or jq is missing)
+
+$ rm treehouse from PATH; bin/fm-bootstrap.sh
+MISSING: treehouse (install: curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh)
+^ treehouse is paseo's only real dependency, and it fails closed on it.
+
+$ echo bogus > config/backend; bin/fm-bootstrap.sh   # paseo now appears in the known list
+BACKEND_INVALID: bogus (known: tmux herdr zellij orca cmux paseo)
+
+=== end of transcript ===
