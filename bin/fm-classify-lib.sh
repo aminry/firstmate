@@ -1836,11 +1836,12 @@ crew_is_paused() {  # <id>
 }
 
 # The token bin/fm-crew-state.sh appends to a `working` run-step detail when the
-# validation pipeline's OWN recency verdict says one of its steps is currently
-# producing output. Declared here, next to its only consumer, so the producer and
-# the consumer cannot drift onto two spellings. Nothing else may write it: a
-# `working` run-step detail is composed entirely from pipeline-reported fields, so
-# no crew-authored status prose can forge this marker into that line.
+# home opted in with config/wedge-defer-pipeline and the validation pipeline's OWN
+# recency verdict says one of its steps is currently producing output. Declared
+# here, next to its only consumer, so the producer and the consumer cannot drift
+# onto two spellings. Nothing else may write it: a `working` run-step detail is
+# composed entirely from pipeline-reported fields, so no crew-authored status prose
+# can forge this marker into that line.
 FM_CLASSIFY_PIPELINE_ACTIVE_MARKER='pipeline-activity: recent'
 
 # 0 when crew <id>'s CURRENT authoritative state is an actively running validation
@@ -1860,7 +1861,11 @@ FM_CLASSIFY_PIPELINE_ACTIVE_MARKER='pipeline-activity: recent'
 # including an empty id, an unreadable verdict, a daemon that cannot be reached, a
 # state that is not `working`, a source that is not the run step, and a working run
 # with no activity report at all. Absence of evidence therefore always leaves the
-# caller's existing escalation schedule untouched.
+# caller's existing escalation schedule untouched. A home that never opted in with
+# config/wedge-defer-pipeline is one more such absence rather than a special case:
+# the producer publishes the marker only under that flag, so this reports 1 there
+# whatever the pipeline is doing, and the sole caller tests the flag before calling
+# so an unconfigured home does not even spend the read.
 #
 # NOT a pure read, and strictly more expensive than crew_absorb_class's own read is
 # already documented to be: it spends one more bounded fm-crew-state.sh call. Call
