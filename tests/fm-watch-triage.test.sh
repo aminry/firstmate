@@ -470,6 +470,48 @@ test_crew_absorb_class_classifier() {
   pass "crew_absorb_class: working/paused/none from one read; crew_is_paused and crew_is_provably_working agree"
 }
 
+# The wedge detector's fourth liveness input: the validation pipeline's own report
+# that one of its steps is currently producing output. It must read as evidence
+# ONLY on a working run-step verdict that actually carries the marker, because
+# every other shape - a quiet step, a parked gate, a busy pane, an unreadable
+# verdict - is either not progress or not proof of it, and reading any of them as
+# progress would suppress a real wedge.
+test_crew_pipeline_activity_classifier() {
+  local dir fakebin
+  dir=$(make_case classify-pipeline-activity); fakebin="$dir/fakebin"
+  export FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh"
+  export FM_FAKE_CREW_STATE
+  FM_FAKE_CREW_STATE='state: working · source: run-step · validating (fixing) · pipeline-activity: recent'
+  crew_pipeline_activity_is_recent a \
+    || fail "a working run step reporting recent pipeline activity was not read as evidence"
+  FM_FAKE_CREW_STATE='state: working · source: run-step · validating (fixing)'
+  ! crew_pipeline_activity_is_recent a \
+    || fail "a working run step with no activity report was read as evidence"
+  FM_FAKE_CREW_STATE='state: parked · source: run-step · parked at review · pipeline-activity: recent'
+  ! crew_pipeline_activity_is_recent a \
+    || fail "a parked gate was read as pipeline activity"
+  FM_FAKE_CREW_STATE='state: working · source: pane · harness busy · pipeline-activity: recent'
+  ! crew_pipeline_activity_is_recent a \
+    || fail "a busy pane was read as pipeline activity"
+  # A status-log verdict carries the crew's OWN note as its detail, so a crew could
+  # otherwise write the source and marker text into its own status line and silence
+  # its own wedge escalation. Only the real first source field may decide.
+  FM_FAKE_CREW_STATE='state: working · source: status-log · working: source: run-step, pipeline-activity: recent'
+  ! crew_pipeline_activity_is_recent a \
+    || fail "crew-authored status text forged a run-step pipeline-activity verdict"
+  FM_FAKE_CREW_STATE='state: unknown · source: none · worktree gone'
+  ! crew_pipeline_activity_is_recent a \
+    || fail "an unknown crew was read as pipeline activity"
+  FM_FAKE_CREW_STATE=''
+  ! crew_pipeline_activity_is_recent a \
+    || fail "an unreadable verdict was read as pipeline activity"
+  FM_FAKE_CREW_STATE='state: working · source: run-step · validating (fixing) · pipeline-activity: recent'
+  ! crew_pipeline_activity_is_recent "" \
+    || fail "an empty id reported pipeline activity"
+  unset FM_FAKE_CREW_STATE
+  pass "crew_pipeline_activity_is_recent: only a working run step that reports recent activity is evidence"
+}
+
 # The wedge detector's third liveness input: writes inside the crew's own recorded
 # worktree. Every negative outcome must report "no evidence" so the caller keeps
 # its existing escalation schedule, and a supervisor-side git read (which touches
@@ -3764,6 +3806,141 @@ test_write_deferral_resurfaces_on_the_bounded_cadence() {
   pass "a write deferral re-surfaces once on the bounded pause cadence, so a churning worktree cannot stay invisible"
 }
 
+# The case neither pane quietness, the run step, nor the worktree walk can answer: a
+# validation round working inside the pipeline's own separate checkout. The crew's
+# pane renders nothing and its worktree is never touched for the length of the
+# round, so the worktree probe correctly reports no evidence and the pipeline's own
+# recency verdict is the only thing left that can tell a live step from a dead one.
+# Both directions matter, and the second one matters more: withdrawing the activity
+# report must restore the unchanged escalation schedule exactly, or a wedged crew
+# behind a surviving run record would never be reported at all.
+test_wedge_escalation_deferred_while_pipeline_reports_activity() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid wt back
+  dir=$(make_case wedge-pipeline-activity); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-validating"; wt="$dir/wt"
+  mkdir -p "$wt/src"
+  printf 'idle validating output' > "$capture_file"
+  printf 'window=%s\nkind=ship\nworktree=%s\n' "$window" "$wt" > "$state/validating.meta"
+  printf 'working: handed to validation\n' > "$state/validating.status"
+  sig=$(seen_sig "$state/validating.status"); printf '%s' "$sig" > "$state/.seen-validating_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle validating output")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  # Already-classified hash whose idle window opened 500s ago, so the first stale
+  # poll lands straight on the at-threshold wedge branch.
+  printf '%s' "$pane_hash" > "$state/.stale-$key"
+  back=$(( $(date +%s) - 500 ))
+  echo "$back" > "$state/.stale-since-$key"
+  set_mtime "$back" "$state/.stale-since-$key"
+  # The worktree is genuinely untouched: everything in it predates the idle window,
+  # exactly as it stays while the pipeline validates in its own checkout. So the
+  # write probe reports nothing and only the pipeline verdict can change the outcome.
+  printf 'int main(void) { return 0; }\n' > "$wt/src/main.c"
+  set_mtime "$(( $(date +%s) - 900 ))" "$wt/src/main.c"
+
+  # Phase A: the pipeline reports its step still producing output. Deferred.
+  export FM_FAKE_CREW_STATE_validating='state: working · source: run-step · validating (fixing) · pipeline-activity: recent'
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=240 \
+    FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_poll_cycle "$state" "$pid"; then
+    reap "$pid"; fail "watcher wedge-escalated a pane whose pipeline reported an active step: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || { reap "$pid"; fail "a pipeline-activity deferral printed a wake reason: $(cat "$out")"; }
+  [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "a pipeline-activity deferral enqueued a wake"; }
+  [ -e "$state/.pipeline-since-$key" ] \
+    || { reap "$pid"; fail "the pipeline-deferral chain marker was not recorded"; }
+  [ ! -e "$state/.writing-since-$key" ] \
+    || { reap "$pid"; fail "an untouched worktree was recorded as write evidence"; }
+  [ ! -e "$state/.wedge-escalations-$key" ] \
+    || { reap "$pid"; fail "a pipeline-activity deferral advanced the wedge escalation counter"; }
+  [ "$(cat "$state/.stale-since-$key" 2>/dev/null || echo 0)" -gt "$back" ] \
+    || { reap "$pid"; fail "a deferral did not restart the idle timer, so the next window cannot re-probe"; }
+  reap "$pid"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the intentional phase-A watcher stop"
+
+  # Phase B: identical fixture and identical pane, but the pipeline has withdrawn
+  # its activity report - the shape a run record keeps once its step really did
+  # die. The unchanged schedule must still fire.
+  export FM_FAKE_CREW_STATE_validating='state: working · source: run-step · validating (fixing)'
+  echo "$back" > "$state/.stale-since-$key"
+  set_mtime "$back" "$state/.stale-since-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=240 \
+    FM_PAUSE_RESURFACE_SECS=999 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 \
+    || fail "a crew whose pipeline reported no activity did not wedge-escalate on the existing schedule"
+  grep -F "stale: $window" "$out" >/dev/null || fail "the quiet-pipeline escalation did not print a stale wake"
+  grep -F "possible wedge" "$out" >/dev/null || fail "the quiet-pipeline escalation did not flag a possible wedge"
+  [ "$(cat "$state/.wedge-escalations-$key" 2>/dev/null || true)" = 1 ] \
+    || fail "the quiet-pipeline escalation was not counted"
+  [ ! -e "$state/.stale-since-$key" ] || fail "the idle timer was not cleared after a real escalation"
+  [ ! -e "$state/.pipeline-since-$key" ] || fail "the pipeline-deferral chain outlived a real escalation"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null \
+    || fail "drain after the quiet-pipeline escalation failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null \
+    || fail "the quiet-pipeline escalation was not queued"
+  unset FM_FAKE_CREW_STATE_validating
+  pass "a quiet pane whose pipeline reports an active step is deferred, while one with no activity report still wedge-escalates on the unchanged schedule"
+}
+
+# A pipeline deferral is not silence either. A run can report activity indefinitely
+# while making no real progress, so its chain ages and re-surfaces once per
+# PAUSE_RESURFACE_SECS on its own throttle, labeled as a recheck rather than a wedge.
+test_pipeline_deferral_resurfaces_on_the_bounded_cadence() {
+  local dir state fakebin out drain_out capture_file window key pane_hash sig pid wt back
+  dir=$(make_case wedge-pipeline-resurface); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"; capture_file="$dir/pane.txt"
+  window="test:fm-longrun"; wt="$dir/wt"
+  mkdir -p "$wt/src"
+  printf 'idle validating output' > "$capture_file"
+  printf 'window=%s\nkind=ship\nworktree=%s\n' "$window" "$wt" > "$state/longrun.meta"
+  printf 'working: handed to validation\n' > "$state/longrun.status"
+  sig=$(seen_sig "$state/longrun.status"); printf '%s' "$sig" > "$state/.seen-longrun_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle validating output")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  printf '%s' "$pane_hash" > "$state/.stale-$key"
+  back=$(( $(date +%s) - 500 ))
+  echo "$back" > "$state/.stale-since-$key"
+  set_mtime "$back" "$state/.stale-since-$key"
+  # This pane has been deferring on pipeline activity for 500s already.
+  : > "$state/.pipeline-since-$key"
+  set_mtime "$back" "$state/.pipeline-since-$key"
+  printf 'quiet\n' > "$wt/src/main.c"
+  set_mtime "$(( $(date +%s) - 900 ))" "$wt/src/main.c"
+  export FM_FAKE_CREW_STATE_longrun='state: working · source: run-step · validating (fixing) · pipeline-activity: recent'
+
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=240 \
+    FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 100 || fail "a long-running pipeline deferral never re-surfaced on the bounded cadence"
+  grep -F "stale: $window" "$out" >/dev/null || fail "the pipeline-deferral recheck did not print a stale wake"
+  grep -F "validation pipeline has reported an active step" "$out" >/dev/null \
+    || fail "the pipeline-deferral recheck was not labeled as such"
+  grep -F "possible wedge" "$out" >/dev/null && fail "a pipeline-deferral recheck was mislabeled a possible wedge"
+  [ -e "$state/.pipeline-resurfaced-$key" ] \
+    || fail "the pipeline-deferral re-surface throttle marker was not recorded"
+  [ ! -e "$state/.wedge-escalations-$key" ] \
+    || fail "a pipeline-deferral recheck advanced the wedge escalation counter"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$drain_out" 2>/dev/null \
+    || fail "drain after the pipeline-deferral recheck failed"
+  grep "$(printf '\tstale\t')" "$drain_out" | grep -F "$window" >/dev/null \
+    || fail "the pipeline-deferral recheck was not queued"
+  unset FM_FAKE_CREW_STATE_longrun
+  pass "a pipeline deferral re-surfaces once on the bounded pause cadence, so an unproductive run cannot stay invisible"
+}
+
 # The worktree recorded for a secondmate is a provisioned firstmate home, and that
 # home runs its OWN supervision inside itself: its watcher beacon, pane hashes and
 # heartbeats keep state/ churning whether or not the mate produced anything. Reading
@@ -4800,6 +4977,7 @@ test_classifier_primitives
 test_crew_is_provably_working_classifier
 test_status_is_paused_classifier
 test_crew_absorb_class_classifier
+test_crew_pipeline_activity_classifier
 test_crew_worktree_written_since_classifier
 test_empty_write_prune_widens_the_probe
 test_empty_write_prune_from_the_environment_widens_the_probe
@@ -4878,6 +5056,8 @@ test_paused_authoritative_working_preserves_wedge_timer
 test_nonterminal_stale_repairs_missing_or_corrupt_timer
 test_wedge_escalation_deferred_while_worktree_is_written
 test_write_deferral_resurfaces_on_the_bounded_cadence
+test_wedge_escalation_deferred_while_pipeline_reports_activity
+test_pipeline_deferral_resurfaces_on_the_bounded_cadence
 test_secondmate_home_supervision_churn_is_not_write_evidence
 test_timer_repair_drops_a_finished_write_deferral_chain
 test_terminal_first_sight_drops_a_finished_write_deferral_chain

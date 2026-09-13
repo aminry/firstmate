@@ -64,7 +64,11 @@
 #      coarse runs-ledger fallback (no steps table, no ci log), a terminal
 #      FAILED record whose daemon an explicit probe proves down reads unknown,
 #      never failed: an instrument failure must not read as work failure
-#      (nm_daemon_probe_down).
+#      (nm_daemon_probe_down). A `working` run-step verdict additionally carries
+#      fm-classify-lib.sh's pipeline-activity marker when the pipeline's own
+#      recency verdict reports an active step currently producing output; a quiet
+#      or unreported step carries no marker, so the marker is positive evidence
+#      only and never a claim that the step has stalled.
 #   3. Reconcile the status log: if its last line says needs-decision/blocked but
 #      the run-step shows the run moved on, the log is deterministically stale and
 #      is flagged superseded. A genuinely parked run plus a needs-decision log
@@ -765,6 +769,19 @@ if [ "$HAVE_RUN" = 1 ]; then
       fi
       ;;
   esac
+
+  # Publish the pipeline's OWN liveness verdict on a working run step, so a reader
+  # can tell a validation step that is currently producing output from a run record
+  # that merely still says `running`. Only positive recency is published; a quiet or
+  # unreported step simply carries no marker. fm-classify-lib.sh owns the token and
+  # crew_pipeline_activity_is_recent is its consumer.
+  if [ "$RUN_STATE" = working ] && nm_run_activity_is_recent; then
+    if [ -n "$RUN_DETAIL" ]; then
+      RUN_DETAIL="$RUN_DETAIL${SEP}$FM_CLASSIFY_PIPELINE_ACTIVE_MARKER"
+    else
+      RUN_DETAIL="$FM_CLASSIFY_PIPELINE_ACTIVE_MARKER"
+    fi
+  fi
 
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi

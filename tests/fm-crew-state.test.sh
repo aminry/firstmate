@@ -2045,6 +2045,38 @@ EOF
   pass "crew_is_provably_working absorbs a validating crew found only via the runs-list fallback"
 }
 
+# The pipeline's own recency verdict is published on a working run-step line, so
+# the watcher can tell a validation step that is currently producing output from a
+# run record that merely still says `fixing`. Positive evidence only: the quiet
+# variant of the same run must carry no marker, or a stalled step would silence the
+# wedge detector for as long as its record survives.
+test_working_run_publishes_pipeline_activity_marker() {
+  reset_fakes
+  local d out; d=$(new_case pipeline-activity-marker)
+  make_repo_on_branch "$d/wt" fm/feat-pa
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-pa.meta" "window=fm:fm-feat-pa" "worktree=$d/wt" "kind=ship"
+
+  FM_FAKE_AXI_STATUS="$(run_fixing_active_recent fm/feat-pa)"
+  out=$(run_crew_state "$d" feat-pa)
+  assert_contains "$out" "state: working" "a fresh fixing run is still working"
+  assert_contains "$out" "source: run-step" "a fresh fixing run is still run-step sourced"
+  assert_contains "$out" "pipeline-activity: recent" \
+    "a run reporting fresh activity did not publish the pipeline-activity marker"
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-pa \
+    || fail "the published marker was not readable as pipeline activity"
+
+  FM_FAKE_AXI_STATUS="$(run_fixing_active_quiet fm/feat-pa)"
+  out=$(run_crew_state "$d" feat-pa)
+  assert_contains "$out" "state: working" "a quiet fixing run is still working"
+  assert_not_contains "$out" "pipeline-activity: recent" \
+    "a run the pipeline itself marked quiet still published the activity marker"
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-pa \
+    && fail "a quiet step read as pipeline activity"
+
+  pass "a working run publishes the pipeline-activity marker only while the pipeline reports it active"
+}
+
 test_not_provably_working_when_stopped() {
   reset_fakes
   local d; d=$(new_case provably-working-stopped)
@@ -2551,6 +2583,7 @@ test_remote_unreachable_is_unknown_remote_not_dead
 test_remote_dead_reports_remote_verdict
 test_missing_meta
 test_provably_working_via_runs_list_fallback
+test_working_run_publishes_pipeline_activity_marker
 test_not_provably_working_when_stopped
 test_usage_error
 test_historical_same_branch_rewritten_head_not_current
