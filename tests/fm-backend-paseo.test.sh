@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/fm-backend-paseo.test.sh - portable regressions for the paseo backend's
 # SAFETY BOUNDARY, which lands before any lifecycle code exists: registration
-# as a known-but-not-spawn-capable name, runtime-detection ordering, the spawn
+# as a known-but-not-spawn-capable name, explicit-only selection, the spawn
 # refusal, and the cleanup-record refusal.
 #
 # Nothing here runs a real `paseo`, and nothing here can. That is the point of
@@ -10,11 +10,12 @@
 # with no Paseo installed and never reaches a live Paseo daemon. The
 # real-binary smoke test arrives with the lifecycle adapter.
 #
-# Detection ordering is the load-bearing case. Paseo exports PASEO_AGENT_ID into
-# every process an agent session starts, so a tmux pane spawned by a
-# Paseo-hosted firstmate carries BOTH markers and only $TMUX names the layer
-# actually executing - the both-markers cases below are what keep that from
-# silently rerouting a whole fleet.
+# Explicit-only selection is the load-bearing case. Paseo exports PASEO_AGENT_ID
+# into every process an agent session starts, so a tmux pane spawned by a
+# Paseo-hosted firstmate carries that marker even though Paseo is not the layer
+# executing. An ambient value that leaks that far cannot stand in for the
+# captain's consent, so paseo is never auto-detected and the cases below are
+# what keep an inherited marker from rerouting a whole fleet.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -85,147 +86,101 @@ test_paseo_required_tools_are_transport_independent() {
   pass "fm_backend_required_tools: paseo requires treehouse and declares no PATH-resolved Paseo CLI"
 }
 
-# --- detection ---------------------------------------------------------------
+# --- explicit-only selection -------------------------------------------------
 
-test_paseo_detect_markers() {
-  local out rc
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed when PASEO_AGENT_ID is set"
-  [ "$out" = paseo ] || fail "PASEO_AGENT_ID alone should detect paseo, got '$out'"
-
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_AGENT_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_TERMINAL_ID='terminal-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed when PASEO_TERMINAL_ID is set"
-  [ "$out" = paseo ] || fail "PASEO_TERMINAL_ID alone should detect paseo, got '$out'"
-
-  # The winning signal is reported, so a caller can say WHICH Paseo context won.
-  set +e
-  (
-    unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' \
-      fm_backend_detect >/dev/null || exit 1
-    [ "$FM_BACKEND_DETECT_SIGNAL" = PASEO_AGENT_ID ] || exit 2
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='' PASEO_TERMINAL_ID='terminal-uuid' \
-      fm_backend_detect >/dev/null || exit 3
-    [ "$FM_BACKEND_DETECT_SIGNAL" = PASEO_TERMINAL_ID ] || exit 4
-  )
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] \
-    || fail "fm_backend_detect did not report the winning Paseo marker in FM_BACKEND_DETECT_SIGNAL (subshell exit $rc)"
-
-  pass "fm_backend_detect: either PASEO_AGENT_ID or PASEO_TERMINAL_ID selects paseo and names itself as the signal"
-}
-
-test_paseo_cli_is_not_a_detection_marker() {
+test_paseo_is_never_auto_detected() {
   local out
-  # PASEO_CLI is exported by the Paseo CLI shim into everything it touches, so
-  # it survives arbitrarily far down a process tree and cannot mean "running
-  # inside Paseo". Detection must ignore it, and every other inherited PASEO_*
-  # value, entirely.
-  if out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier PASEO_AGENT_ID PASEO_TERMINAL_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_CLI='/Applications/Paseo.app/Contents/Resources/bin/paseo' \
-    PASEO_WEB_UI_ENABLED=false PASEO_AGENT_CWD=/tmp fm_backend_detect); then
-    fail "PASEO_CLI (plus other inherited PASEO_* values) must not detect paseo, got '$out'"
+  # paseo is EXPLICIT-ONLY, like zellij and orca. No ambient marker may select
+  # it. PASEO_AGENT_ID is the reason: it LEAKS through a tmux spawn into every
+  # descendant (see docs/verification/runtime-backends.md#paseo), so selecting
+  # paseo from it would capture workers on a Paseo-hosted machine that the
+  # captain never pointed at Paseo.
+  if out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier PASEO_TERMINAL_ID; \
+    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' fm_backend_detect); then
+    fail "PASEO_AGENT_ID must not auto-detect any backend, got '$out'"
   fi
-  pass "fm_backend_detect: PASEO_CLI is a binary-resolution variable, never a runtime marker"
+
+  if out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier PASEO_AGENT_ID; \
+    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_TERMINAL_ID='terminal-uuid' fm_backend_detect); then
+    fail "PASEO_TERMINAL_ID must not auto-detect any backend, got '$out'"
+  fi
+
+  # Both markers at once, plus every other inherited PASEO_* value the CLI shim
+  # exports, still selects nothing.
+  if out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier; \
+    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' PASEO_TERMINAL_ID='terminal-uuid' \
+    PASEO_CLI='/Applications/Paseo.app/Contents/Resources/bin/paseo' \
+    PASEO_WEB_UI_ENABLED=false PASEO_AGENT_CWD=/tmp fm_backend_detect); then
+    fail "no combination of PASEO_* markers may auto-detect a backend, got '$out'"
+  fi
+
+  pass "fm_backend_detect: no Paseo marker, alone or combined, ever selects a backend"
 }
 
-test_paseo_detect_is_ordered_last() {
+test_paseo_markers_do_not_disturb_the_other_backends() {
   local out
-  # The live case: a tmux pane spawned by a Paseo-hosted firstmate carries BOTH
-  # $TMUX and PASEO_AGENT_ID. Only $TMUX names the layer actually executing, so
-  # checking paseo any earlier would reroute every tmux task of a Paseo-hosted
-  # firstmate to an experimental backend.
+  # Non-vacuity guard for the case above: detection must still WORK while a
+  # Paseo marker is present, so "paseo was not selected" can never be satisfied
+  # by a detector that simply stopped detecting anything.
   out=$(unset HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
     PATH="$FAKE_NONDARWIN_BIN:$PATH" TMUX='fake,1,0' PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with both \$TMUX and PASEO_AGENT_ID present"
-  [ "$out" = tmux ] || fail "\$TMUX must win over PASEO_AGENT_ID (innermost-first), got '$out'"
-
-  out=$(unset HERDR_ENV CMUX_WORKSPACE_ID PASEO_AGENT_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" TMUX='fake,1,0' PASEO_TERMINAL_ID='terminal-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with both \$TMUX and PASEO_TERMINAL_ID present"
-  [ "$out" = tmux ] || fail "\$TMUX must win over PASEO_TERMINAL_ID (innermost-first), got '$out'"
+    || fail "fm_backend_detect should still succeed with \$TMUX and PASEO_AGENT_ID present"
+  [ "$out" = tmux ] || fail "\$TMUX must still detect tmux alongside PASEO_AGENT_ID, got '$out'"
 
   out=$(unset TMUX CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
     PATH="$FAKE_NONDARWIN_BIN:$PATH" HERDR_ENV=1 PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with both HERDR_ENV and PASEO_AGENT_ID present"
-  [ "$out" = herdr ] || fail "HERDR_ENV=1 must win over PASEO_AGENT_ID, got '$out'"
+    || fail "fm_backend_detect should still succeed with HERDR_ENV and PASEO_AGENT_ID present"
+  [ "$out" = herdr ] || fail "HERDR_ENV=1 must still detect herdr alongside PASEO_AGENT_ID, got '$out'"
 
   out=$(unset TMUX HERDR_ENV PASEO_TERMINAL_ID; \
     PATH="$FAKE_NONDARWIN_BIN:$PATH" CMUX_WORKSPACE_ID='fake-uuid' PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with both CMUX_WORKSPACE_ID and PASEO_AGENT_ID present"
-  [ "$out" = cmux ] || fail "CMUX_WORKSPACE_ID must win over PASEO_AGENT_ID, got '$out'"
+    || fail "fm_backend_detect should still succeed with CMUX_WORKSPACE_ID and PASEO_AGENT_ID present"
+  [ "$out" = cmux ] || fail "CMUX_WORKSPACE_ID must still detect cmux alongside PASEO_AGENT_ID, got '$out'"
 
-  # Paseo also sits behind the cmux FALLBACK signals, not just its primary
-  # marker: an inherited cmux bundle id still outranks a Paseo marker.
   out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
     PATH="$FAKE_DARWIN_BIN:$PATH" __CFBundleIdentifier='com.cmuxterm.app' PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with a cmux bundle id and PASEO_AGENT_ID present"
-  [ "$out" = cmux ] || fail "the cmux bundle-id fallback must be consulted before paseo, got '$out'"
+    || fail "fm_backend_detect should still succeed with a cmux bundle id and PASEO_AGENT_ID present"
+  [ "$out" = cmux ] || fail "the cmux bundle-id fallback must still detect cmux alongside PASEO_AGENT_ID, got '$out'"
 
-  # Pathological: every marker at once. tmux still wins.
-  out=$(PATH="$FAKE_NONDARWIN_BIN:$PATH" TMUX='fake,1,0' HERDR_ENV=1 CMUX_WORKSPACE_ID='fake-uuid' \
-    PASEO_AGENT_ID='agent-uuid' PASEO_TERMINAL_ID='terminal-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with all markers present"
-  [ "$out" = tmux ] || fail "tmux must win with all markers present, got '$out'"
-
-  # The divergence itself: with the other markers removed, the SAME Paseo marker
-  # that just lost now wins - so none of the cases above passed vacuously.
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier PASEO_TERMINAL_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' fm_backend_detect) \
-    || fail "fm_backend_detect should succeed with PASEO_AGENT_ID alone"
-  [ "$out" = paseo ] || fail "PASEO_AGENT_ID alone should still detect paseo, got '$out'"
-
-  pass "fm_backend_detect: paseo is checked LAST - \$TMUX, HERDR_ENV, and both cmux signals all outrank a Paseo marker, which still wins alone"
+  pass "fm_backend_detect: tmux, herdr, and both cmux signals still detect normally while a Paseo marker is present"
 }
 
-test_paseo_autodetect_notice_and_explicit_override() {
+test_paseo_selects_only_when_asked_explicitly_and_prints_no_notice() {
   local dir cfg errfile out
-  dir=$(mktemp -d "$TMP_ROOT/name-notice.XXXXXX")
+  dir=$(mktemp -d "$TMP_ROOT/name-explicit.XXXXXX")
   cfg="$dir/config"; errfile="$dir/err"
   mkdir -p "$cfg"
 
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
+  # An ambient Paseo marker alone falls through to the tmux default, silently.
+  # No notice: there is no auto-detection left to announce.
+  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID __CFBundleIdentifier PASEO_TERMINAL_ID; \
     PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' \
     FM_BACKEND='' FM_BACKEND_CONFIG_DIR="$cfg" fm_backend_name 2>"$errfile")
-  [ "$out" = paseo ] || fail "fm_backend_name should auto-detect paseo from PASEO_AGENT_ID, got '$out'"
-  assert_contains "$(cat "$errfile")" "auto-detected paseo runtime (PASEO_AGENT_ID)" \
-    "the paseo auto-detect notice should name the winning signal"
-  assert_contains "$(cat "$errfile")" "EXPERIMENTAL" \
-    "the paseo auto-detect notice should say the backend is experimental"
-  # The notice must describe what actually happens: paseo is not in
-  # FM_BACKEND_SPAWN, so the very next thing every spawn caller does is refuse.
-  assert_contains "$(cat "$errfile")" "every spawn refuses" \
-    "the paseo auto-detect notice should say spawns refuse, not that a spawn is happening"
+  [ "$out" = tmux ] || fail "an ambient Paseo marker must fall through to the tmux default, got '$out'"
+  [ ! -s "$errfile" ] \
+    || fail "an ambient Paseo marker must print no notice, got '$(cat "$errfile")'"
   case "$(cat "$errfile")" in
-    *"spawning into the EXPERIMENTAL paseo backend"*)
-      fail "the paseo auto-detect notice claims a spawn that fm_backend_validate_spawn refuses: $(cat "$errfile")" ;;
+    *"auto-detected paseo"*)
+      fail "the removed paseo auto-detect notice is still being printed: $(cat "$errfile")" ;;
   esac
 
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_AGENT_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_TERMINAL_ID='terminal-uuid' \
+  # Divergence proof: the SAME environment selects paseo the moment the captain
+  # asks for it explicitly, so the assertions above are about consent, not about
+  # paseo being unselectable.
+  printf 'paseo\n' > "$cfg/backend"
+  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID PASEO_AGENT_ID; \
+    PATH="$FAKE_NONDARWIN_BIN:$PATH" \
     FM_BACKEND='' FM_BACKEND_CONFIG_DIR="$cfg" fm_backend_name 2>"$errfile")
-  [ "$out" = paseo ] || fail "fm_backend_name should auto-detect paseo from PASEO_TERMINAL_ID, got '$out'"
-  assert_contains "$(cat "$errfile")" "auto-detected paseo runtime (PASEO_TERMINAL_ID)" \
-    "the paseo auto-detect notice should name PASEO_TERMINAL_ID when that marker wins"
+  [ "$out" = paseo ] || fail "config/backend=paseo must select paseo, got '$out'"
+  [ ! -s "$errfile" ] \
+    || fail "an explicitly configured backend must print nothing, got '$(cat "$errfile")'"
 
-  # An explicit setting always wins outright, and silently: this is exactly how
-  # a home pins itself to another backend while an experimental one soaks.
-  printf 'tmux\n' > "$cfg/backend"
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' \
-    FM_BACKEND='' FM_BACKEND_CONFIG_DIR="$cfg" fm_backend_name 2>"$errfile")
-  [ "$out" = tmux ] || fail "config/backend should win over a Paseo auto-detect marker, got '$out'"
-  [ ! -s "$errfile" ] || fail "an explicitly configured backend must not print an auto-detect notice, got '$(cat "$errfile")'"
+  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID PASEO_AGENT_ID; \
+    PATH="$FAKE_NONDARWIN_BIN:$PATH" \
+    FM_BACKEND=paseo FM_BACKEND_CONFIG_DIR="$cfg" fm_backend_name 2>"$errfile")
+  [ "$out" = paseo ] || fail "FM_BACKEND=paseo must select paseo, got '$out'"
 
-  out=$(unset TMUX HERDR_ENV CMUX_WORKSPACE_ID PASEO_TERMINAL_ID; \
-    PATH="$FAKE_NONDARWIN_BIN:$PATH" PASEO_AGENT_ID='agent-uuid' \
-    FM_BACKEND=tmux FM_BACKEND_CONFIG_DIR="$cfg" fm_backend_name 2>"$errfile")
-  [ "$out" = tmux ] || fail "FM_BACKEND should win over a Paseo auto-detect marker, got '$out'"
-
-  pass "fm_backend_name: a Paseo marker auto-detects with one loud notice naming the signal, and any explicit setting silently wins"
+  pass "fm_backend_name: paseo is reachable only by explicit config/backend or FM_BACKEND, never from a marker, and never announces itself"
 }
 
 # --- spawn refusals ----------------------------------------------------------
@@ -446,10 +401,9 @@ TRIPWIRE
 test_paseo_is_known_but_not_spawn_capable
 test_unknown_backend_still_refuses_and_names_paseo
 test_paseo_required_tools_are_transport_independent
-test_paseo_detect_markers
-test_paseo_cli_is_not_a_detection_marker
-test_paseo_detect_is_ordered_last
-test_paseo_autodetect_notice_and_explicit_override
+test_paseo_is_never_auto_detected
+test_paseo_markers_do_not_disturb_the_other_backends
+test_paseo_selects_only_when_asked_explicitly_and_prints_no_notice
 test_spawn_refuses_paseo_at_the_shared_boundary
 test_paseo_endpoint_records_refuse_while_no_adapter_can_close_them
 test_every_endpoint_backend_teardown_accepts_can_be_closed
