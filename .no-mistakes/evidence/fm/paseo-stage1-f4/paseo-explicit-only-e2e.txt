@@ -1,0 +1,68 @@
+
+===============================================================
+1. AUTO-DETECTION REMOVED  (same ambient environment, before vs after)
+===============================================================
+Paseo exports PASEO_AGENT_ID into every descendant process, so an inherited
+marker must not be read as the captain's consent to use the paseo backend.
+
+$ PASEO_AGENT_ID=agent-uuid fm_backend_detect      # BEFORE (commit 9aa6940)
+detected=<paseo> exit=0
+
+$ PASEO_AGENT_ID=agent-uuid fm_backend_detect      # AFTER  (this change)
+detected=<> exit=1
+
+===============================================================
+2. AMBIENT MARKERS NEVER ROUTE A REAL SPAWN THROUGH PASEO
+===============================================================
+Same fm-spawn command, PASEO_AGENT_ID + PASEO_TERMINAL_ID inherited, no
+explicit backend anywhere. The backend boundary is crossed without paseo
+being selected - the run stops later, on an unrelated missing-home check.
+
+$ PASEO_AGENT_ID=... PASEO_TERMINAL_ID=... fm-spawn.sh sm-demo --secondmate
+error: no firstmate home supplied or registered for sm-demo
+exit=1
+
+===============================================================
+3. EXPLICIT SELECTION IS THE ONLY WAY IN - AND EVERY SPAWN REFUSES
+===============================================================
+
+$ fm-spawn.sh sm-demo --secondmate        # selected via --backend paseo
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit=1
+
+$ fm-spawn.sh sm-demo --secondmate        # selected via FM_BACKEND=paseo
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit=1
+
+$ fm-spawn.sh sm-demo --secondmate        # selected via config/backend file containing 'paseo'
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit=1
+
+$ fm-spawn.sh <project> claude --mode no-mistakes --yolo off --backend paseo   # ship spawn
+error: backend 'paseo' does not support task spawning yet (spawn-supported: tmux herdr zellij orca cmux)
+exit=1
+
+$ ls state/            # no task record was written by any refused spawn
+(empty)
+
+===============================================================
+4. A backend=paseo CLEANUP RECORD REFUSES INSTEAD OF ORPHANING THE TERMINAL
+===============================================================
+
+$ cat state/paseo-task.meta
+window=wks_c7e413f9c986b0f8:11111111-2222-3333-4444-555555555555
+endpoint_task_id=paseo-task
+worktree=/tmp/paseo-e2e.WvfF3y/worktree
+project=/tmp/paseo-e2e.WvfF3y/project
+backend=paseo
+kind=scout
+paseo_workspace_id=wks_c7e413f9c986b0f8
+paseo_terminal_id=11111111-2222-3333-4444-555555555555
+
+$ fm-teardown.sh paseo-task --force
+REFUSED: backend 'paseo' has no lifecycle adapter, so task paseo-task's endpoint cannot be closed; preserving task state.
+exit=1
+
+$ ls state/ worktree/   # durable task identity and worktree survive the refusal
+paseo-task.meta
+sentinel
