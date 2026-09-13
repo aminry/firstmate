@@ -67,7 +67,8 @@
 #      (nm_daemon_probe_down). A `working` run-step verdict additionally carries
 #      fm-classify-lib.sh's pipeline-activity marker when the pipeline's own
 #      recency verdict reports an active step currently producing output; a quiet
-#      or unreported step carries no marker, so the marker is positive evidence
+#      or unreported step, and any coarse verdict (whose captured output belongs
+#      to some other run), carry no marker, so the marker is positive evidence
 #      only and never a claim that the step has stalled.
 #   3. Reconcile the status log: if its last line says needs-decision/blocked but
 #      the run-step shows the run moved on, the log is deterministically stale and
@@ -775,7 +776,16 @@ if [ "$HAVE_RUN" = 1 ]; then
   # that merely still says `running`. Only positive recency is published; a quiet or
   # unreported step simply carries no marker. fm-classify-lib.sh owns the token and
   # crew_pipeline_activity_is_recent is its consumer.
-  if [ "$RUN_STATE" = working ] && nm_run_activity_is_recent; then
+  # Gated on RUN_SOURCE too, because nm_run_activity_is_recent parses $RUN_OUT and
+  # `coarse` marks exactly the two cases where $RUN_OUT is NOT this crew's
+  # authoritative output: a foreign-branch answer, and a terminal answer displaced
+  # by a live ledger sibling. In both, RUN_STATE/RUN_DETAIL come from this
+  # worktree's ledger row while $RUN_OUT still describes a different run, so an
+  # ungated append would publish another crew's liveness here - letting any other
+  # crew's active validation suppress this crew's wedge escalation, the exact
+  # inversion of the positive-evidence-only invariant. The consumer above is
+  # already shielded because RUN_STATUS is only ever set on the full path.
+  if [ "$RUN_SOURCE" = full ] && [ "$RUN_STATE" = working ] && nm_run_activity_is_recent; then
     if [ -n "$RUN_DETAIL" ]; then
       RUN_DETAIL="$RUN_DETAIL${SEP}$FM_CLASSIFY_PIPELINE_ACTIVE_MARKER"
     else

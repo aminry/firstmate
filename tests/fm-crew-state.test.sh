@@ -2077,6 +2077,37 @@ test_working_run_publishes_pipeline_activity_marker() {
   pass "a working run publishes the pipeline-activity marker only while the pipeline reports it active"
 }
 
+# The marker is read off the CAPTURED `axi status` output, and on the coarse path
+# that output belongs to a different run: bare `axi status` answers with the
+# most-recently-touched run fleet-wide, so a crew whose own state came from the
+# runs ledger would otherwise publish whichever OTHER crew happened to be
+# validating. Publishing it there inverts the whole point of the marker - any busy
+# crew on the fleet would suppress a wedged crew's escalation indefinitely.
+test_coarse_run_does_not_publish_another_crews_pipeline_activity() {
+  reset_fakes
+  local d out short; d=$(new_case pipeline-activity-coarse)
+  make_repo_on_branch "$d/wt" fm/feat-coarse
+  short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-coarse.meta" "window=fm:fm-feat-coarse" "worktree=$d/wt" "kind=ship"
+  # Another crew's run is the most-recently-touched one, and its step is actively
+  # producing output. This crew's own row in the ledger only says `running`.
+  FM_FAKE_AXI_STATUS="$(run_fixing_active_recent fm/other-crew)"
+  FM_FAKE_RUNS_LIST="$(cat <<EOF
+  running    fm/other-crew aaaaaaa  2026-07-02 22:10
+  running    fm/feat-coarse ${short}  2026-07-02 22:05
+EOF
+)"
+  out=$(run_crew_state "$d" feat-coarse)
+  assert_contains "$out" "state: working" "the coarse ledger row is still working"
+  assert_not_contains "$out" "pipeline-activity: recent" \
+    "a coarse verdict published another crew's pipeline activity"
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-coarse \
+    && fail "another crew's active validation was read as this crew's pipeline activity"
+
+  pass "a coarse runs-ledger verdict never publishes another crew's pipeline activity"
+}
+
 test_not_provably_working_when_stopped() {
   reset_fakes
   local d; d=$(new_case provably-working-stopped)
@@ -2584,6 +2615,7 @@ test_remote_dead_reports_remote_verdict
 test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_working_run_publishes_pipeline_activity_marker
+test_coarse_run_does_not_publish_another_crews_pipeline_activity
 test_not_provably_working_when_stopped
 test_usage_error
 test_historical_same_branch_rewritten_head_not_current
