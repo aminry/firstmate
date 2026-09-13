@@ -43,13 +43,15 @@
 #                          worktree was written during the quiet window is
 #                          deferred rather than escalated (wedge_defer_writing),
 #                          because files appearing there are liveness the pane and
-#                          the run step cannot show. A pane whose validation
+#                          the run step cannot show. In a home that opts in with
+#                          config/wedge-defer-pipeline, a pane whose validation
 #                          pipeline reports one of its own steps still producing
-#                          output is deferred the same way (wedge_defer_pipeline),
-#                          because a validation round runs in the pipeline's
-#                          separate checkout, where neither the pane nor the crew's
-#                          worktree can show it, and a run record alone says
-#                          `running` whether or not that step is still alive.
+#                          output is deferred the same way (default-off,
+#                          wedge_defer_pipeline), because a validation round runs
+#                          in the pipeline's separate checkout, where neither the
+#                          pane nor the crew's worktree can show it, and a run
+#                          record alone says `running` whether or not that step is
+#                          still alive.
 #                          Both share ONE deferral chain, so a quiet stretch
 #                          still re-surfaces once per PAUSE_RESURFACE_SECS
 #                          however its evidence alternates, and a pane with no
