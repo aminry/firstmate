@@ -1,0 +1,45 @@
+bin/fm-crew-state.sh CLI output: the new pipeline-activity verdict
+=================================================================
+
+Driven by the real 'axi status' TOON reader over a fake axi. The only input
+that differs between A and B is the active_steps last_activity column
+(8s vs "quiet 31m2s") - the pipeline's OWN recency verdict.
+C is the fleet-safety case: bare 'axi status' answers with the
+most-recently-touched run fleet-wide, so another crew's live validation must
+never be published as THIS crew's liveness.
+
+###########################################################################
+# BEFORE - base commit b182d0f (A and B are indistinguishable)
+###########################################################################
+=== real bin/fm-crew-state.sh output, driven by real `axi status` TOON ===
+
+A. this crew's own run, step producing output 8s ago (active_steps last_activity=8s)
+  bin/fm-crew-state.sh feat-pa ->
+      state: working · source: run-step · validating (fixing)
+
+B. the SAME run gone quiet (last_activity="quiet 31m2s") - step may really be dead
+  bin/fm-crew-state.sh feat-pa ->
+      state: working · source: run-step · validating (fixing)
+
+C. ANOTHER crew (fm/other-crew) is the freshest run and is active; this crew's own row comes from the coarse ledger
+  bin/fm-crew-state.sh feat-coarse ->
+      state: working · source: run-step · validating (background run)
+
+
+###########################################################################
+# AFTER - target commit 1779c74
+###########################################################################
+=== real bin/fm-crew-state.sh output, driven by real `axi status` TOON ===
+
+A. this crew's own run, step producing output 8s ago (active_steps last_activity=8s)
+  bin/fm-crew-state.sh feat-pa ->
+      state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+
+B. the SAME run gone quiet (last_activity="quiet 31m2s") - step may really be dead
+  bin/fm-crew-state.sh feat-pa ->
+      state: working · source: run-step · validating (fixing)
+
+C. ANOTHER crew (fm/other-crew) is the freshest run and is active; this crew's own row comes from the coarse ledger
+  bin/fm-crew-state.sh feat-coarse ->
+      state: working · source: run-step · validating (background run)
+

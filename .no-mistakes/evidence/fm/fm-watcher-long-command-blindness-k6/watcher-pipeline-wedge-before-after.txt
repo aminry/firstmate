@@ -1,0 +1,86 @@
+Watcher blindness to a long, quiet-but-alive validation step: before vs after
+===========================================================================
+
+Fixture is IDENTICAL in both trees and in both cases (the paseo-stage1-f4 shape):
+  * pane 'paseo:fm-paseo-stage1-f4' has rendered the same frame for 500s
+  * the crew's own worktree has not been touched for 900s (a validation round
+    runs in the pipeline's separate checkout, so the crew tree never moves)
+  * the run record says 'working / run-step' in BOTH cases
+  * FM_STALE_ESCALATE_SECS=240, so the pane is at the wedge threshold
+The ONLY thing that differs between CASE 1 and CASE 2 is whether the pipeline
+itself reports one of its own steps as currently producing output.
+
+###########################################################################
+# BEFORE - base commit b182d0f
+###########################################################################
+==========================================================================
+TREE: /tmp/fm-base-b182d0f
+==========================================================================
+
+CASE 1 - the pipeline reports one of its OWN steps still producing output
+         (healthy worker; every escalation here was noise)
+  crew state the watcher read:
+      state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+  watcher:  EXITED on an actionable wake - a supervision turn is spent
+  what firstmate is told (watcher stdout):
+      stale: paseo:fm-paseo-stage1-f4 (idle 500s, possible wedge, escalation 1)
+  durable wake queue after drain:
+      1789318537	1	stale	paseo:fm-paseo-stage1-f4	stale: paseo:fm-paseo-stage1-f4 (idle 500s, possible wedge, escalation 1)
+  wedge escalation counter: 1
+
+CASE 2 - identical pane, pipeline reports NO active step (genuinely wedged)
+  crew state the watcher read:
+      state: working · source: run-step · validating (fixing)
+  watcher:  EXITED on an actionable wake - a supervision turn is spent
+  what firstmate is told (watcher stdout):
+      stale: paseo:fm-paseo-stage1-f4 (idle 500s, possible wedge, escalation 1)
+  durable wake queue after drain:
+      1789318539	1	stale	paseo:fm-paseo-stage1-f4	stale: paseo:fm-paseo-stage1-f4 (idle 500s, possible wedge, escalation 1)
+  wedge escalation counter: 1
+
+
+###########################################################################
+# AFTER - target commit 1779c74
+###########################################################################
+==========================================================================
+TREE: /tmp/fm-head-1779c74
+==========================================================================
+
+CASE 1 - the pipeline reports one of its OWN steps still producing output
+         (healthy worker; every escalation here was noise)
+  crew state the watcher read:
+      state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+  watcher:  still absorbing - firstmate was NOT woken
+  what firstmate is told (watcher stdout):
+      (nothing)
+  durable wake queue after drain:
+      (empty)
+  wedge escalation counter: (none)
+
+CASE 2 - identical pane, pipeline reports NO active step (genuinely wedged)
+  crew state the watcher read:
+      state: working · source: run-step · validating (fixing)
+  watcher:  EXITED on an actionable wake - a supervision turn is spent
+  what firstmate is told (watcher stdout):
+      stale: paseo:fm-paseo-stage1-f4 (idle 501s, possible wedge, escalation 1)
+  durable wake queue after drain:
+      1789318583	1	stale	paseo:fm-paseo-stage1-f4	stale: paseo:fm-paseo-stage1-f4 (idle 501s, possible wedge, escalation 1)
+  wedge escalation counter: 1
+
+
+###########################################################################
+# AFTER - the deferral is bounded, not a silence hole
+###########################################################################
+The pane enters this poll with an already-open .progress-since chain anchored 500s
+ago - the SAME single file a write deferral opens, since both sources now share one
+merged chain - and the pipeline deferral ages that existing anchor rather than
+starting a fresh window. So one continuous quiet stretch re-surfaces once from its
+FIRST deferral however its evidence alternates, and it re-surfaces as a recheck,
+not as a wedge, with the escalation counter untouched.
+
+CASE 3 - same active-pipeline pane, deferring for 500s, cadence 240s
+  what firstmate is told (watcher stdout):
+      stale: paseo:fm-paseo-stage1-f4 (idle 501s, its validation pipeline has reported an active step for 501s, rechecked on a long cadence not a wedge; confirm the pipeline is really progressing)
+  durable wake queue after drain:
+      1789318609	1	stale	paseo:fm-paseo-stage1-f4	stale: paseo:fm-paseo-stage1-f4 (idle 501s, its validation pipeline has reported an active step for 501s, rechecked on a long cadence not a wedge; confirm the pipeline is really progressing)
+  wedge escalation counter: (none)

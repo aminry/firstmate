@@ -1,0 +1,24 @@
+Targeted suites (all green)
+===========================
+
+$ bin/fm-test-run.sh tests/fm-watch-triage.test.sh
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=645985
+  cases covering this change:
+    ok - crew_pipeline_activity_is_recent: only a working run step that reports recent activity is evidence
+    ok - away mode hands a busy declared pause to the daemon as a plain stale, and lifting the declaration restores the wedge escalation
+    ok - a quiet pane writing its own worktree is deferred, while one writing nothing still wedge-escalates on the unchanged schedule
+    ok - a write deferral re-surfaces once on the bounded pause cadence, so a churning worktree cannot stay invisible
+    ok - a quiet pane whose pipeline reports an active step is deferred, while one with no activity report still wedge-escalates on the unchanged schedule
+    ok - a pipeline deferral re-surfaces once on the bounded pause cadence, so an unproductive run cannot stay invisible
+    ok - a secondmate's own home supervision churn is not crew write evidence, so a pane recording that home keeps the unchanged escalation schedule
+    ok - an idle-window timer repair drops a finished write-deferral chain, so the next deferral gets a fresh re-surface window
+    ok - both first-sight paths through a captain-relevant status drop a finished write-deferral chain with the idle window
+
+$ bin/fm-test-run.sh tests/fm-crew-state.test.sh
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=33672
+  cases covering this change:
+    ok - a working run publishes the pipeline-activity marker only while the pipeline reports it active
+    ok - a coarse runs-ledger verdict never publishes another crew's pipeline activity
+
+$ bin/fm-test-run.sh tests/fm-daemon.test.sh   # clear_pause_tracking rm list touched by the chain rename
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=40001
