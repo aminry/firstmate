@@ -197,8 +197,21 @@ make_no_timeout_toolbin() {  # <dir> -> echoes toolbin path
 
 # Run the helper for one case dir. FM_FAKE_* env (run output, busy flag) are read
 # from the caller's environment by the fakes above.
+# Always points the reader at a case-local config dir, created empty unless the
+# case opted in with crew_state_optin below. bin/fm-crew-state.sh consults
+# config/wedge-defer-pipeline, so without this every case would read the
+# developer's real home config and the flag's two directions could not be tested
+# hermetically.
 run_crew_state() {  # <case-dir> <id>
-  PATH="$1/fakebin:$PATH" FM_STATE_OVERRIDE="$1/state" "$CREW_STATE" "$2"
+  mkdir -p "$1/config"
+  PATH="$1/fakebin:$PATH" FM_STATE_OVERRIDE="$1/state" FM_CONFIG_OVERRIDE="$1/config" \
+    "$CREW_STATE" "$2"
+}
+
+# Opt <case-dir> into the default-off pipeline-activity marker.
+crew_state_optin() {  # <case-dir>
+  mkdir -p "$1/config"
+  : > "$1/config/wedge-defer-pipeline"
 }
 
 new_case() {  # <name> -> echoes case dir with an empty state/
@@ -2056,6 +2069,7 @@ test_working_run_publishes_pipeline_activity_marker() {
   make_repo_on_branch "$d/wt" fm/feat-pa
   make_fakebin "$d" >/dev/null
   fm_write_meta "$d/state/feat-pa.meta" "window=fm:fm-feat-pa" "worktree=$d/wt" "kind=ship"
+  crew_state_optin "$d"
 
   FM_FAKE_AXI_STATUS="$(run_fixing_active_recent fm/feat-pa)"
   out=$(run_crew_state "$d" feat-pa)
@@ -2063,7 +2077,8 @@ test_working_run_publishes_pipeline_activity_marker() {
   assert_contains "$out" "source: run-step" "a fresh fixing run is still run-step sourced"
   assert_contains "$out" "pipeline-activity: recent" \
     "a run reporting fresh activity did not publish the pipeline-activity marker"
-  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-pa \
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" FM_CONFIG_OVERRIDE="$d/config" \
+    crew_pipeline_activity_is_recent feat-pa \
     || fail "the published marker was not readable as pipeline activity"
 
   FM_FAKE_AXI_STATUS="$(run_fixing_active_quiet fm/feat-pa)"
@@ -2071,10 +2086,42 @@ test_working_run_publishes_pipeline_activity_marker() {
   assert_contains "$out" "state: working" "a quiet fixing run is still working"
   assert_not_contains "$out" "pipeline-activity: recent" \
     "a run the pipeline itself marked quiet still published the activity marker"
-  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-pa \
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" FM_CONFIG_OVERRIDE="$d/config" \
+    crew_pipeline_activity_is_recent feat-pa \
     && fail "a quiet step read as pipeline activity"
 
   pass "a working run publishes the pipeline-activity marker only while the pipeline reports it active"
+}
+
+# The publication half of the opt-in boundary. The marker feeds the watcher's
+# default-off deferral, so a home that never set config/wedge-defer-pipeline must
+# not see it at all: not in this line, not as a readable verdict. Identical run to
+# the fresh-activity case above, differing only in the absent flag.
+test_pipeline_activity_marker_requires_the_optin_flag() {
+  reset_fakes
+  local d out; d=$(new_case pipeline-activity-optin-absent)
+  make_repo_on_branch "$d/wt" fm/feat-pn
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-pn.meta" "window=fm:fm-feat-pn" "worktree=$d/wt" "kind=ship"
+
+  FM_FAKE_AXI_STATUS="$(run_fixing_active_recent fm/feat-pn)"
+  out=$(run_crew_state "$d" feat-pn)
+  assert_contains "$out" "state: working" "an unconfigured home still reads a fixing run as working"
+  assert_contains "$out" "source: run-step" "an unconfigured home still reads it as run-step sourced"
+  assert_not_contains "$out" "pipeline-activity" \
+    "an unconfigured home published the pipeline-activity marker it never opted into"
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" FM_CONFIG_OVERRIDE="$d/config" \
+    crew_pipeline_activity_is_recent feat-pn \
+    && fail "an unconfigured home reported readable pipeline activity"
+
+  # Same run, same everything, flag now present: the marker appears. This is what
+  # proves the absence above is the flag's doing and not a broken fixture.
+  crew_state_optin "$d"
+  out=$(run_crew_state "$d" feat-pn)
+  assert_contains "$out" "pipeline-activity: recent" \
+    "opting in did not publish the marker, so the flag-absent case proves nothing"
+
+  pass "the pipeline-activity marker is published only in a home that opted in"
 }
 
 # The marker is read off the CAPTURED `axi status` output, and on the coarse path
@@ -2090,6 +2137,10 @@ test_coarse_run_does_not_publish_another_crews_pipeline_activity() {
   short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
   make_fakebin "$d" >/dev/null
   fm_write_meta "$d/state/feat-coarse.meta" "window=fm:fm-feat-coarse" "worktree=$d/wt" "kind=ship"
+  # Opted in deliberately: with the flag absent the marker is suppressed for a
+  # different reason, and this case would pass while proving nothing about the
+  # RUN_SOURCE gate it exists to test.
+  crew_state_optin "$d"
   # Another crew's run is the most-recently-touched one, and its step is actively
   # producing output. This crew's own row in the ledger only says `running`.
   FM_FAKE_AXI_STATUS="$(run_fixing_active_recent fm/other-crew)"
@@ -2615,6 +2666,7 @@ test_remote_dead_reports_remote_verdict
 test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_working_run_publishes_pipeline_activity_marker
+test_pipeline_activity_marker_requires_the_optin_flag
 test_coarse_run_does_not_publish_another_crews_pipeline_activity
 test_not_provably_working_when_stopped
 test_usage_error

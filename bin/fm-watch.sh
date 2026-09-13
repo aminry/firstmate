@@ -977,6 +977,13 @@ clear_defer_tracking() {  # <window-key>
 # the worktree is silent does the pipeline's own liveness verdict get asked, which
 # is the one source that can see a validation round working inside the pipeline's
 # separate checkout.
+#
+# That second probe is default-off and runs only for a home that opted in with
+# config/wedge-defer-pipeline. The flag is checked BEFORE the probe, so an
+# unconfigured home spends no pipeline read either: it escalates on exactly the
+# schedule, evidence, and reasons it did before this deferral existed. The
+# pre-existing worktree-write deferral above is deliberately outside the flag,
+# because it is unchanged behavior that homes already rely on.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task>
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 since age n reason
   since=$(cat "$since_file" 2>/dev/null || true)
@@ -995,7 +1002,8 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
           wedge_defer_writing "$win" "$since_file" "$label" "$age"
           return 0
         fi
-        if crew_pipeline_activity_is_recent "$task"; then
+        if [ -e "$CONFIG/wedge-defer-pipeline" ] \
+          && crew_pipeline_activity_is_recent "$task"; then
           wedge_defer_pipeline "$win" "$since_file" "$label" "$age"
           return 0
         fi
