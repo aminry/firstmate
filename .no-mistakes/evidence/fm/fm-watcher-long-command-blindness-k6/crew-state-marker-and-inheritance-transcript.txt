@@ -1,0 +1,20 @@
+Firstmate wedge-deferral opt-in - crew-state marker and secondmate inheritance
+repo: d3c825e
+run record served to both homes: fixing run on fm/feat-demo, review step last produced output 8s ago
+
+== bin/fm-crew-state.sh feat-demo - UNCONFIGURED home (flag absent) ==
+  config dir contents: (empty)
+    | state: working · source: run-step · validating (fixing)
+
+== bin/fm-crew-state.sh feat-demo - same run, home OPTED IN ==
+  config dir contents: wedge-defer-pipeline 
+    | state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+
+== secondmate inheritance via the DEFAULT inheritable set ==
+  primary home config/:    wedge-defer-pipeline 
+  secondmate config/ before: (empty)
+  running propagate_inheritable_config with the shipped FM_INHERITABLE_CONFIG default
+  secondmate config/ after:  wedge-defer-pipeline 
+  the captain choice reached the secondmate home: its own watcher defers too
+  unconfigured primary -> secondmate config/: (empty)
+

@@ -1,0 +1,55 @@
+Firstmate wedge-deferral opt-in (config/wedge-defer-pipeline) - live watcher transcript
+repo: d3c825e
+fixture (identical in every scenario below): pane quiet and already classified stale 500s ago,
+wedge threshold 240s, crew worktree untouched for 900s.
+
+== Scenario 1: crew IS inside a pipeline step - UNCONFIGURED home (flag absent) ==
+  crew-state verdict the watcher reads: state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+  config dir contents: (empty)
+  watcher exited on an actionable wake (the pre-existing behavior)
+  supervisor-visible wake output:
+    | stale: demo:fm-unconfigured (idle 501s, possible wedge, escalation 1)
+  drained wake queue (bin/fm-wake-drain.sh):
+    | 1789336745	1	stale	demo:fm-unconfigured	stale: demo:fm-unconfigured (idle 501s, possible wedge, escalation 1)
+  state/.wedge-escalations-demo_fm-unconfigured: 1
+  state/.progress-since-demo_fm-unconfigured:    (absent)
+  state/.progress-resurfaced-demo_fm-unconfigured: (absent)
+
+== Scenario 2: same crew, same fixture - home OPTED IN (touch config/wedge-defer-pipeline) ==
+  crew-state verdict the watcher reads: state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+  config dir contents: wedge-defer-pipeline 
+  watcher completed a full poll cycle and stayed up: the escalation was deferred
+  supervisor-visible wake output:
+    | (nothing - no supervision turn consumed)
+  wake queue: empty
+  state/.wedge-escalations-demo_fm-optedin: (absent)
+  state/.progress-since-demo_fm-optedin:    present
+  state/.progress-resurfaced-demo_fm-optedin: (absent)
+
+== Scenario 3: opted-in home, pipeline withdraws its activity report ==
+  crew-state verdict the watcher reads: state: working · source: run-step · validating (fixing)
+  watcher escalated: a genuinely wedged crew is still reported
+  supervisor-visible wake output:
+    | stale: demo:fm-withdrawn (idle 501s, possible wedge, escalation 1)
+  state/.wedge-escalations-demo_fm-withdrawn: 1
+  state/.progress-since-demo_fm-withdrawn:    (absent)
+  state/.progress-resurfaced-demo_fm-withdrawn: (absent)
+
+== Scenario 4: unconfigured home, pre-existing worktree-write deferral (must be unchanged) ==
+  crew worktree was just written; config dir is empty
+  watcher stayed up: the pre-existing write deferral still works with the opt-in absent
+  supervisor-visible wake output:
+    | (nothing)
+  state/.wedge-escalations-demo_fm-writing: (absent)
+  state/.progress-since-demo_fm-writing:    present
+  state/.progress-resurfaced-demo_fm-writing: (absent)
+
+
+== Scenario 5: an unconfigured home spends no extra pipeline read ==
+  crew-state reads during one stale poll, flag ABSENT:  0
+  crew-state reads during one stale poll, flag PRESENT: 1
+
+== the flag file itself is local and gitignored ==
+    | $ git check-ignore -v config/wedge-defer-pipeline
+    | .gitignore:13:config/	config/wedge-defer-pipeline
+
