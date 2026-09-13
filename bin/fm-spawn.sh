@@ -63,8 +63,7 @@
 #   terminal, so ship/scout Orca spawns do not run treehouse get; cmux is a
 #   session provider only, exactly like herdr/zellij, so it does. A resolved
 #   backend that is known but not spawn-capable refuses at
-#   fm_backend_validate_spawn before any task record exists, so auto-detection
-#   can select a backend this script will then refuse. An auto-detected
+#   fm_backend_validate_spawn before any task record exists. An auto-detected
 #   non-tmux backend prints a loud stderr notice; auto-detected tmux stays
 #   silent.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
