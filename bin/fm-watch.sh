@@ -868,7 +868,7 @@ FM_WEDGE_DEMAND_INSPECT_COUNT=${FM_WEDGE_DEMAND_INSPECT_COUNT:-3}
 # once past PAUSE_RESURFACE_SECS the pane wakes once per window rather than every
 # poll. An optional <scope> binds that cadence to its current declaration; callers
 # without a scoped declaration keep the timestamp body. Shared by the
-# declared-pause absorb and the worktree-write deferral so the two cadences cannot
+# declared-pause absorb and the shared progress deferral so the two cadences cannot
 # drift apart; each caller owns its own marker and reason.
 # Returns without waking while either the absorb or the throttle is inside the
 # window; wake() itself exits the cycle, exactly as it does inline. An optional
@@ -1123,7 +1123,7 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
       # woken in a loop for the whole declared wait. The suppressor therefore
       # advances to the declaration rather than the hash, and the daemon is woken
       # once per distinct declaration. The wedge timer, escalation count and
-      # write-deferral chain are cleared exactly as handle_paused_stale clears
+      # progress-deferral chain are cleared exactly as handle_paused_stale clears
       # them, so an undeclared busy phase that had already started the timer does
       # not resume its count the moment the declaration is lifted. Normal-mode
       # pause tracking stays unwritten here, exactly as the idle away-mode handoff
@@ -1157,7 +1157,7 @@ clear_pause_state() {  # <window-key>
 }
 
 # The hash-scoped half of clear_pause_tracking: the stale suppressor, its wedge
-# timer and escalation count, and the write-deferral chain. Split out so a caller
+# timer and escalation count, and the progress-deferral chain. Split out so a caller
 # that must keep a window's DECLARATION-scoped pause state - its .paused-* flag,
 # recheck, and re-surface throttle - can still reset the per-hash half alone.
 clear_stale_hash_tracking() {  # <window-key>
