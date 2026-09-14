@@ -2153,7 +2153,8 @@ EOF
   assert_contains "$out" "state: working" "the coarse ledger row is still working"
   assert_not_contains "$out" "pipeline-activity: recent" \
     "a coarse verdict published another crew's pipeline activity"
-  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" crew_pipeline_activity_is_recent feat-coarse \
+  PATH="$d/fakebin:$PATH" FM_STATE_OVERRIDE="$d/state" FM_CONFIG_OVERRIDE="$d/config" \
+    crew_pipeline_activity_is_recent feat-coarse \
     && fail "another crew's active validation was read as this crew's pipeline activity"
 
   pass "a coarse runs-ledger verdict never publishes another crew's pipeline activity"
