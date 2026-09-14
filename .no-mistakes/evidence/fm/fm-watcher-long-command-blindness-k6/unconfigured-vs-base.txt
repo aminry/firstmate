@@ -1,0 +1,4 @@
+=== Same fixture, pipeline actively reporting, config/wedge-defer-pipeline ABSENT ===
+--- base 036fec05 vs branch d16d3ca ---
+
+IDENTICAL: an unconfigured home observes no behavior change.

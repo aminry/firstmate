@@ -1,0 +1,70 @@
+==================================================================
+SCENARIO 1  flag ABSENT - unconfigured home, pipeline actively working
+==================================================================
+config/ contents: [none]
+$ bin/fm-crew-state.sh slow-suite
+  state: working · source: run-step · validating (fixing)
+  PASS  no pipeline-activity marker in an unconfigured home's crew line
+$ bin/fm-watch.sh  (real watcher, real crew-state reader)
+  stale: fmses:fm-slow-suite (idle 502s, possible wedge, escalation 1)
+  PASS  escalated as a possible wedge on the unchanged schedule
+  PASS  escalation counter advanced to 1
+  PASS  no new state file written (.progress-* absent)
+  state/ after the escalation: 19 entries; progress markers: 0
+
+==================================================================
+SCENARIO 2  flag PRESENT - same pane, same run, deferral armed
+==================================================================
+config/ contents: wedge-defer-pipeline 
+$ bin/fm-crew-state.sh slow-suite
+  state: working · source: run-step · validating (fixing) · pipeline-activity: recent
+  PASS  marker published once the home opted in
+$ bin/fm-watch.sh  (still running after a full poll cycle - no wake)
+  PASS  watcher printed no wake reason
+  PASS  nothing enqueued on the wake queue
+  PASS  progress-deferral chain marker recorded
+  PASS  escalation counter untouched
+  PASS  idle timer restarted, so the next window re-probes
+  triage log tail:
+    [2026-09-14T08:35:50-0700] absorbed benign signal: /private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/fm-e2e-wedge-optin.zAgTx2/home/state/slow-suite.status
+    [2026-09-14T08:35:52-0700] absorbed non-terminal stale (pipeline reported recent activity at the escalation point, idle 501s): fmses:fm-slow-suite
+
+==================================================================
+SCENARIO 3  flag PRESENT, pipeline step gone QUIET - must still escalate
+==================================================================
+$ bin/fm-crew-state.sh slow-suite
+  state: working · source: run-step · validating (fixing)
+  PASS  a quiet step withdraws the evidence
+$ bin/fm-watch.sh
+  stale: fmses:fm-slow-suite (idle 500s, possible wedge, escalation 1)
+  PASS  a stalled step is still escalated even with the flag on
+
+==================================================================
+SCENARIO 4  flag PRESENT, long deferral - bounded re-surface
+==================================================================
+$ bin/fm-watch.sh  (deferring for 500s, PAUSE_RESURFACE_SECS=240)
+  stale: fmses:fm-slow-suite (idle 501s, its validation pipeline has reported an active step for 501s, rechecked on a long cadence not a wedge; confirm the pipeline is really progressing)
+  PASS  re-surfaced with the pipeline-deferral reason
+  PASS  labeled a recheck, not a wedge
+  PASS  recheck did not advance the escalation counter
+
+==================================================================
+SCENARIO 5  flag PRESENT, ANOTHER crew validating (coarse answer)
+==================================================================
+$ bin/fm-crew-state.sh slow-suite   (another crew is the freshest run)
+  state: working · source: run-step · validating (background run)
+  PASS  a coarse verdict publishes no foreign pipeline activity
+$ bin/fm-watch.sh
+  stale: fmses:fm-slow-suite (idle 501s, possible wedge, escalation 1)
+  PASS  this crew's wedge is still escalated while another crew validates
+
+==================================================================
+SCENARIO 6  flag ABSENT - the pre-existing worktree-write deferral
+==================================================================
+  PASS  a written worktree is still deferred with the flag absent
+  PASS  write deferral uses the shared .progress-* chain
+  triage log tail:
+    [2026-09-14T08:35:52-0700] absorbed non-terminal stale (pipeline reported recent activity at the escalation point, idle 501s): fmses:fm-slow-suite
+    [2026-09-14T08:36:02-0700] absorbed non-terminal stale (worktree written since the idle window opened, idle 501s): fmses:fm-slow-suite
+
+ALL E2E SCENARIOS PASSED

@@ -1,0 +1,16 @@
+==================================================================
+SECONDMATE INHERITANCE  a captain opts in once, the fleet follows
+==================================================================
+primary config/:  backend wedge-defer-pipeline 
+mate config/ before provisioning:  [empty]
+
+$ propagate_secondmate_inheritance <primary> <mate-home>
+mate config/ after provisioning:  backend wedge-defer-pipeline 
+
+  PASS  the mate inherited config/wedge-defer-pipeline
+
+$ captain clears the flag, re-provisions
+mate config/ after re-provisioning:  backend 
+  PASS  clearing the captain choice clears it fleet-wide
+
+SECONDMATE INHERITANCE PASSED

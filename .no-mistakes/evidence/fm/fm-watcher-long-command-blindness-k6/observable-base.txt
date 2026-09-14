@@ -1,0 +1,7 @@
+wake reason:        stale: fmses:fm-slow (idle NNNs, possible wedge, escalation 1)
+escalation count:   1
+idle timer present: no
+deferral markers:   
+deferral markers:   0
+queued wake kinds:  stale 
+triage decisions:   
