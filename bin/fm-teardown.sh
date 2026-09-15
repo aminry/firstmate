@@ -9,9 +9,9 @@
 # it is removed: those records are the only thing that names what survived, so
 # reporting such a close as a completed cleanup strands the endpoint instead of
 # merely leaving it behind. endpoint_close_refusal below owns that refusal and
-# what --force overrides in it, and bin/fm-backend.sh's fm_backend_kill owns
-# what each backend can prove about its own close - an already-exited endpoint
-# is not a failure and stays silent.
+# the one site where --force overrides it, and bin/fm-backend.sh's
+# fm_backend_kill owns what each backend can prove about its own close - an
+# already-exited endpoint is not a failure and stays silent.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -2955,14 +2955,19 @@ preflight_firstmate_home_herdr_children() {  # <home>
 # about its own close is bin/fm-backend.sh's fm_backend_kill contract.
 #
 # Returns 0 when the caller must continue anyway and 1 when it must stop.
-# <honors-force> is 1 at the main-task close sites, where --force is the
-# operator's existing authority to discard this task's records deliberately -
-# without it an endpoint whose backend can never close again (an uninstalled
-# Orca CLI, say) would refuse every rerun with no way out. It is 0 inside
-# forced secondmate child cleanup, which is only ever reached under --force, so
-# honoring force there would delete the refusal rather than override it, and
-# would contradict the adjacent Herdr child gate that stops forced cleanup for
-# this same hazard.
+# <honors-force> is 1 at exactly one site, the generic non-Herdr/non-Orca
+# close, where --force is the operator's existing authority to discard this
+# task's records deliberately AND continuing is actually reachable: the
+# worktree is already returned by then and nothing after it needs the backend
+# that could not close.
+# It is 0 everywhere else. The Orca site refuses under --force too, because
+# the step immediately after it removes the Orca worktree through the same CLI
+# whose absence is the only thing that arm ever reports, so a forced continue
+# would die there having removed nothing while this message claimed otherwise.
+# The two forced secondmate child sites refuse because that path is only ever
+# reached under --force, so honoring force would delete the refusal rather
+# than override it, and would contradict the adjacent Herdr child gate that
+# stops forced cleanup for this same hazard.
 #
 # What is retained is this run's records, not a durable guarantee: a task
 # carrying a backlog transition already wrote its pending-close marker, and the
@@ -2972,7 +2977,7 @@ endpoint_close_refusal() {  # <subject> <backend> <target> <honors-force>
   local subject=$1 backend=$2 target=$3 honors_force=$4
   echo "error: the $backend endpoint $target for $subject could not be closed, so it may still be live." >&2
   if [ "$honors_force" = 1 ] && [ "$FORCE" = "--force" ]; then
-    echo "error: --force was given, so this cleanup continues and removes the task's records anyway; nothing on disk will name $target afterwards, so reconcile that endpoint yourself." >&2
+    echo "error: --force authorizes continuing past a close that failed, so this cleanup proceeds toward removing the task's records; reconcile $target yourself, because nothing here can still be relied on to name it." >&2
     return 0
   fi
   echo "error: stopping this cleanup without removing the task's records, so the record naming $target is still here to reconcile from." >&2
@@ -3363,7 +3368,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   fi
   if [ -n "$T_ORCA" ]; then
     fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" \
-      || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
+      || { endpoint_close_refusal "$ID" "$BACKEND" "$T" 0; exit 1; }
   fi
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then

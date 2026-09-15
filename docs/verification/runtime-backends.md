@@ -334,10 +334,12 @@ Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that 
 ### Endpoint close
 
 A reported close failure costs teardown every durable record of the task, so what each backend's close actually returns was measured before that status was given any authority.
-Verified on 2026-09-14 with tmux 3.7c by driving `fm_backend_kill` against real endpoints and against each adapter with its CLI absent.
+Verified on 2026-09-14 with tmux 3.7c by driving `fm_backend_kill` against real tmux endpoints, and the Orca arm by driving `fm_backend_orca_kill` under a search path with no `orca` on it.
+Zellij and cmux were not driven with their CLIs absent; the table below states what those arms report today rather than claiming a measurement.
 
 ```sh
 tests/fm-teardown-endpoint-safety.test.sh
+tests/fm-backend-orca.test.sh
 ```
 
 ```text
@@ -346,6 +348,8 @@ ok - fm-teardown: --force continues past a close it could not make while still r
 ok - fm-teardown: a close re-read that could not run refuses, while a definitively absent session or server still completes silently
 ok - fm-teardown: forced secondmate cleanup still refuses on a child endpoint close that failed
 ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
+ok - fm-teardown: an Orca close its missing CLI never attempted refuses even under --force, keeping the record naming the terminal
+ok - fm_backend_orca_kill: a close its missing CLI never attempted reports the failure instead of a success
 ```
 
 An endpoint that is already legitimately gone returns 0 silently on every arm, so ordinary cleanup of an already-exited session is unchanged: real tmux returns 0 for a live window, for a re-close of that same gone window, and for a close into a session whose whole server has exited.
@@ -367,10 +371,14 @@ Any other read failure - a momentarily unresponsive server, or a teardown PATH w
 
 Two bounds of the refusal are known and deliberately not closed here.
 
-`--force` overrides it at the two main-task close sites.
-The operator already owns that authority for discarding a task's records, and without the override an endpoint whose backend can never close again - an Orca record on a host where the CLI was uninstalled - would refuse every rerun with no way out.
+`--force` overrides it at exactly one site, the generic non-Herdr/non-Orca close.
+That is the only close where continuing is actually reachable: the worktree is already returned by then and nothing after it needs the backend that could not close, so `--force` - the operator's existing authority to discard a task's records - can mean something there.
 A forced run still prints the full diagnosis naming the backend, the target, and that the close failed, so what may survive is never silent.
-The two child close sites inside forced secondmate cleanup keep refusing: that path is only ever reached under `--force`, so honoring force there would delete the refusal rather than override it, and would contradict the adjacent Herdr child gate that stops forced cleanup for the same hazard.
+It states what `--force` authorizes rather than what will have happened, because a later refusal in the same run - the Herdr confirmed-gone gate, or the inactive-reconcile delivery gate - can still stop it with every record retained.
+
+The Orca close refuses under `--force` too.
+The step immediately after it removes the Orca worktree through the same CLI whose absence is the only thing that arm ever reports, so a forced continue would die there having removed nothing while claiming the records were already gone.
+The two child close sites inside forced secondmate cleanup also keep refusing: that path is only ever reached under `--force`, so honoring force there would delete the refusal rather than override it, and would contradict the adjacent Herdr child gate that stops forced cleanup for the same hazard.
 
 The retained record is this run's, not a durable guarantee.
 A task carrying a backlog transition writes its pending-close marker before the endpoint close, and the marker survives the refusal; the next `bin/fm-bootstrap.sh` replays it and removes the retained record.
@@ -381,7 +389,8 @@ Both directions are proven non-vacuous.
 Restoring the swallowed status makes the refusal case report `teardown <id> complete`, delete the endpoint record, and leave the window live.
 Keeping the refusal but dropping the exact re-read makes an already-exited endpoint refuse its own cleanup, and also fails the cleanup identity case above.
 Letting an unreadable inventory pass for absence makes the unreadable case complete and remove the record while the window is still there.
-Removing the `--force` arm makes the forced case refuse, and honoring `--force` at the child sites makes forced secondmate cleanup continue past a child endpoint it could not close.
+Removing the `--force` arm makes the forced generic case refuse; honoring `--force` at the child sites makes forced secondmate cleanup continue past a child endpoint it could not close, and honoring it at the Orca site makes that forced cleanup abort on the missing CLI after announcing that it was continuing.
+Restoring `fm_backend_orca_kill`'s swallowed tool check makes the CLI-absent adapter case report success.
 Dropping the retention-is-not-durable line makes the refusal claim a retention teardown does not own.
 
 ## Claude workspace trust
