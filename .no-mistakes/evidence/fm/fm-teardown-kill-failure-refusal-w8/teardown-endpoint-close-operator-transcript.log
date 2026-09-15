@@ -1,0 +1,165 @@
+
+================ SCENARIO A - live tmux window, teardown run with no tmux on PATH (TARGET build) ================
+--- before: windows in session ---
+  control
+  fm-strand-demo
+--- before: task record ---
+strand-demo.meta
+$ bin/fm-teardown.sh strand-demo     (PATH without tmux)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: tmux window crew:fm-strand-demo could not be read after its close, so whether it survived is unknown
+error: the tmux endpoint crew:fm-strand-demo for strand-demo could not be closed, so it may still be live.
+error: stopping this cleanup without removing the task's records, so the record naming crew:fm-strand-demo is still here to reconcile from.
+error: that retention is not durable across a session start: if this task carries a backlog transition, the next session replays its pending close and removes the retained record, so reconcile the surviving endpoint yourself rather than trusting the retention.
+error: rerun teardown once the close can succeed, or rerun with --force to discard this task's records deliberately.
+exit=1
+--- after: task record ---
+strand-demo.meta
+--- after: windows in session ---
+  control
+  fm-strand-demo
+
+================ SCENARIO A' - SAME fixture, SAME situation, BASE build (the bug being fixed) ================
+$ bin/fm-teardown.sh strand-demo     (base commit da5e658, PATH without tmux)
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/tmp/fm-e2e-01M2HP/run/Abase/nonexistent-project: skipped: not a directory
+teardown strand-demo complete (window base-crew:fm-strand-demo, worktree /tmp/fm-e2e-01M2HP/run/Abase/nonexistent-worktree)
+Backlog: strand-demo just finished (this home keeps no markdown backlog at /private/tmp/fm-e2e-01M2HP/run/Abase/home/data/backlog.md). Update /private/tmp/fm-e2e-01M2HP/run/Abase/home/data/backlog.md - move strand-demo to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+--- after: task record (base) ---
+home-summary.json
+terminal-outcomes
+--- after: windows in session (base) ---
+  control
+  fm-strand-demo
+
+================ SCENARIO B - same task, tmux back on PATH: the retained record lets the rerun finish ================
+$ bin/fm-teardown.sh strand-demo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+/tmp/fm-e2e-01M2HP/run/A/nonexistent-project: skipped: not a directory
+teardown strand-demo complete (window crew:fm-strand-demo, worktree /tmp/fm-e2e-01M2HP/run/A/nonexistent-worktree)
+Backlog: strand-demo just finished (this home keeps no markdown backlog at /private/tmp/fm-e2e-01M2HP/run/A/home/data/backlog.md). Update /private/tmp/fm-e2e-01M2HP/run/A/home/data/backlog.md - move strand-demo to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+--- after: task record ---
+home-summary.json
+terminal-outcomes
+--- after: windows in session ---
+  control
+
+================ SCENARIO C - recorded window already exited: ordinary cleanup must stay silent ================
+before windows:
+  control
+$ bin/fm-teardown.sh gone-task
+/tmp/fm-e2e-01M2HP/run2/C/nonexistent-project: skipped: not a directory
+teardown gone-task complete (window crew:fm-gone-task, worktree /tmp/fm-e2e-01M2HP/run2/C/nonexistent-worktree)
+Backlog: gone-task just finished (this home keeps no markdown backlog at /private/tmp/fm-e2e-01M2HP/run2/C/home/data/backlog.md). Update /private/tmp/fm-e2e-01M2HP/run2/C/home/data/backlog.md - move gone-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state dir after: home-summary.json terminal-outcomes 
+
+================ SCENARIO D - close fails, re-read shows the window STILL PRESENT (adversarial: close accepted-then-failed) ================
+$ bin/fm-teardown.sh survivor-task     (kill-window blocked, window really alive)
+error: tmux window crew:fm-survivor-task is still present after its close
+error: the tmux endpoint crew:fm-survivor-task for survivor-task could not be closed, so it may still be live.
+error: stopping this cleanup without removing the task's records, so the record naming crew:fm-survivor-task is still here to reconcile from.
+error: that retention is not durable across a session start: if this task carries a backlog transition, the next session replays its pending close and removes the retained record, so reconcile the surviving endpoint yourself rather than trusting the retention.
+error: rerun teardown once the close can succeed, or rerun with --force to discard this task's records deliberately.
+exit=1
+state dir after: .guard-watcher-stale-banner survivor-task.meta 
+windows after:
+  control
+  fm-survivor-task
+
+================ SCENARIO E - SAME failure, operator passes --force (generic tmux site) ================
+$ bin/fm-teardown.sh survivor-task --force
+error: tmux window crew:fm-survivor-task is still present after its close
+error: the tmux endpoint crew:fm-survivor-task for survivor-task could not be closed, so it may still be live.
+error: --force authorizes continuing past a close that failed, so this cleanup proceeds toward removing the task's records; reconcile crew:fm-survivor-task yourself, because nothing here can still be relied on to name it.
+/tmp/fm-e2e-01M2HP/run2/D/nonexistent-project: skipped: not a directory
+teardown survivor-task complete (window crew:fm-survivor-task, worktree /tmp/fm-e2e-01M2HP/run2/D/nonexistent-worktree)
+Backlog: survivor-task just finished (this home keeps no markdown backlog at /private/tmp/fm-e2e-01M2HP/run2/D/home/data/backlog.md). Update /private/tmp/fm-e2e-01M2HP/run2/D/home/data/backlog.md - move survivor-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state dir after: home-summary.json terminal-outcomes 
+windows after:
+  control
+  fm-survivor-task
+
+================ SCENARIO F - adversarial exactness: recorded window gone, PREFIX NEIGHBOUR alive, kill blocked ================
+live windows (recorded target fm-neighbour does NOT exist):
+  control
+  fm-neighbour-extra
+$ bin/fm-teardown.sh fm-prefix-demo     (kill-window blocked)
+REFUSED: tmux endpoint 'prefixsess:fm-neighbour' is malformed or does not belong to task fm-prefix-demo; preserving task state.
+exit=1
+state dir after: fm-prefix-demo.meta 
+windows after (neighbour must be untouched):
+  control
+  fm-neighbour-extra
+
+================ SCENARIO F - adversarial exactness: recorded window gone, PREFIX NEIGHBOUR alive, kill blocked ================
+live windows (recorded target fm-neighbour does NOT exist; only its prefix neighbour does):
+  control
+  fm-neighbour-extra
+$ bin/fm-teardown.sh neighbour     (kill-window blocked)
+/tmp/fm-e2e-01M2HP/run3/F/nonexistent-project: skipped: not a directory
+teardown neighbour complete (window prefixsess:fm-neighbour, worktree /tmp/fm-e2e-01M2HP/run3/F/nonexistent-worktree)
+Backlog: neighbour just finished (this home keeps no markdown backlog at /private/tmp/fm-e2e-01M2HP/run3/F/home/data/backlog.md). Update /private/tmp/fm-e2e-01M2HP/run3/F/home/data/backlog.md - move neighbour to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0
+state dir after: home-summary.json terminal-outcomes 
+windows after (neighbour must be untouched):
+  control
+  fm-neighbour-extra
+
+================ SCENARIO G - Orca task record, 'orca' CLI absent, operator uses --force ================
+(host has no orca CLI at all)
+$ bin/fm-teardown.sh orca-strand --force
+error: backend=orca selected but the 'orca' CLI is not installed
+error: the orca endpoint term-7 for orca-strand could not be closed, so it may still be live.
+error: stopping this cleanup without removing the task's records, so the record naming term-7 is still here to reconcile from.
+error: that retention is not durable across a session start: if this task carries a backlog transition, the next session replays its pending close and removes the retained record, so reconcile the surviving endpoint yourself rather than trusting the retention.
+exit=1
+state dir after: .guard-watcher-stale-banner orca-strand.meta 
+
+================ SCENARIO H - forced secondmate cleanup, child endpoint close fails ================
+$ bin/fm-teardown.sh mate-task --force     (child kill-window blocked, child window alive)
+error: tmux window mates:fm-child-task is still present after its close
+error: the tmux endpoint mates:fm-child-task for child child-task could not be closed, so it may still be live.
+error: stopping this cleanup without removing the task's records, so the record naming mates:fm-child-task is still here to reconcile from.
+error: that retention is not durable across a session start: if this task carries a backlog transition, the next session replays its pending close and removes the retained record, so reconcile the surviving endpoint yourself rather than trusting the retention.
+exit=1
+parent state dir after: .guard-watcher-stale-banner mate-task.meta 
+child  state dir after: child-task.meta 
+windows after:
+  control
+  fm-child-task
+
+================ SCENARIO I - unchanged backends must not start refusing: zellij + cmux tasks on a host with neither CLI installed ================
+$ bin/fm-teardown.sh zellij-task     (backend=zellij, 'zellij' CLI not installed on this host)
+/tmp/fm-e2e-01M2HP/run4/zellij/nonexistent-project: skipped: not a directory
+teardown zellij-task complete (window lab:7, worktree /tmp/fm-e2e-01M2HP/run4/zellij/nonexistent-worktree)
+exit=0
+state dir after: home-summary.json terminal-outcomes 
+
+$ bin/fm-teardown.sh cmux-task     (backend=cmux, 'cmux' CLI not installed on this host)
+/tmp/fm-e2e-01M2HP/run4/cmux/nonexistent-project: skipped: not a directory
+teardown cmux-task complete (window workspace-1:surface-2, worktree /tmp/fm-e2e-01M2HP/run4/cmux/nonexistent-worktree)
+exit=0
+state dir after: home-summary.json terminal-outcomes 
+
+
+================ SCENARIO J - fm_backend_kill contract, driven directly: already-gone endpoints on every arm stay a silent 0 ================
+fm_backend_kill zellij  lab:7                    -> exit=0 stderr/stdout=<silent>
+fm_backend_kill cmux    workspace-1:surface-2    -> exit=0 stderr/stdout=<silent>
+fm_backend_kill herdr   lab:w1:p2                -> exit=0 stderr/stdout=error: herdr server for session 'lab' did not report running within 10s
+fm_backend_kill tmux    gone-session:fm-nope (no tmux on PATH) -> exit=1 stderr/stdout=error: tmux window gone-session:fm-nope could not be read after its close, so whether it survived is unknown
