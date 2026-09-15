@@ -347,8 +347,8 @@ ok - fm-teardown: a close that genuinely failed refuses and keeps the record nam
 ok - fm-teardown: --force continues past a close it could not make while still reporting it, and the same case refuses without --force
 ok - fm-teardown: a close re-read that could not run refuses, while a definitively absent session or server still completes silently
 ok - fm-teardown: forced secondmate cleanup still refuses on a child endpoint close that failed
-ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
 ok - fm-teardown: an Orca close its missing CLI never attempted refuses even under --force, keeping the record naming the terminal
+ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
 ok - fm_backend_orca_kill: a close its missing CLI never attempted reports the failure instead of a success
 ```
 
