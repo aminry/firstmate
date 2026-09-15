@@ -342,6 +342,9 @@ tests/fm-teardown-endpoint-safety.test.sh
 
 ```text
 ok - fm-teardown: a close that genuinely failed refuses and keeps the record naming the surviving endpoint, and the same teardown finishes once the close works
+ok - fm-teardown: --force continues past a close it could not make while still reporting it, and the same case refuses without --force
+ok - fm-teardown: a close re-read that could not run refuses, while a definitively absent session or server still completes silently
+ok - fm-teardown: forced secondmate cleanup still refuses on a child endpoint close that failed
 ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
 ```
 
@@ -350,7 +353,7 @@ The refusal is reached only through a close that could not do its job, and each 
 
 | Backend | already gone | a close that failed |
 | --- | --- | --- |
-| tmux | 0, silent | 1, resolved by re-reading the window's exact recorded identity |
+| tmux | 0, silent | 1, resolved by re-reading the window's exact recorded identity; a read that itself could not run refuses rather than passing for absence |
 | orca | 0, silent | 1 when a missing CLI means no close was attempted; 0 for a close command that failed after the CLI accepted it |
 | zellij | 0, silent | 0, not yet distinguishable |
 | cmux | 0, silent | 0, not yet distinguishable |
@@ -359,10 +362,27 @@ The refusal is reached only through a close that could not do its job, and each 
 The three arms that still report 0 need a presence re-read taken after their own close, and the close-then-read timing that re-read depends on cannot be established without the real Zellij, Orca, and cmux binaries.
 Guessing it is what a refusal must never rest on: a gate that refused an already-exited session would break ordinary cleanup on every task, which is a worse failure than the stranded endpoint it would be trying to prevent.
 tmux's re-read is deliberately exact - `=session` plus a whole-line window-name match - because a prefix match would read a neighboring window as this window's survivor, which is the same exactness the cleanup identity boundary above already requires.
+It is also deliberately conservative about the read itself, sharing `fm_backend_tmux_window_inventory` with `fm_backend_tmux_agent_state` so both mean the same thing by an absent session: only a definitive missing-session, missing-server, or connect-error response proves the window gone.
+Any other read failure - a momentarily unresponsive server, or a teardown PATH without tmux on it - refuses, because a read that could not run is not evidence of absence.
+
+Two bounds of the refusal are known and deliberately not closed here.
+
+`--force` overrides it at the two main-task close sites.
+The operator already owns that authority for discarding a task's records, and without the override an endpoint whose backend can never close again - an Orca record on a host where the CLI was uninstalled - would refuse every rerun with no way out.
+A forced run still prints the full diagnosis naming the backend, the target, and that the close failed, so what may survive is never silent.
+The two child close sites inside forced secondmate cleanup keep refusing: that path is only ever reached under `--force`, so honoring force there would delete the refusal rather than override it, and would contradict the adjacent Herdr child gate that stops forced cleanup for the same hazard.
+
+The retained record is this run's, not a durable guarantee.
+A task carrying a backlog transition writes its pending-close marker before the endpoint close, and the marker survives the refusal; the next `bin/fm-bootstrap.sh` replays it and removes the retained record.
+The pre-existing Herdr confirmed-gone gate has the identical property.
+The refusal message says so rather than promising a retention teardown does not own, so an operator reconciles the surviving endpoint instead of trusting the record to still be there later.
 
 Both directions are proven non-vacuous.
 Restoring the swallowed status makes the refusal case report `teardown <id> complete`, delete the endpoint record, and leave the window live.
 Keeping the refusal but dropping the exact re-read makes an already-exited endpoint refuse its own cleanup, and also fails the cleanup identity case above.
+Letting an unreadable inventory pass for absence makes the unreadable case complete and remove the record while the window is still there.
+Removing the `--force` arm makes the forced case refuse, and honoring `--force` at the child sites makes forced secondmate cleanup continue past a child endpoint it could not close.
+Dropping the retention-is-not-durable line makes the refusal claim a retention teardown does not own.
 
 ## Claude workspace trust
 
