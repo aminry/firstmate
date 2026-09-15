@@ -972,6 +972,138 @@ test_own_and_absent_slot_claims_still_tear_down() {
   pass "fm-teardown: a task's own slot claim, and an unclaimed slot, both still tear down"
 }
 
+# The tmux shim used by the two endpoint-close tests below: every subcommand
+# reaches the real isolated server, so presence is always read from real tmux.
+# When FM_TEST_BLOCK_KILL is set, `kill-window` alone fails without forwarding,
+# which is a close that genuinely could not do its job - the recorded window is
+# demonstrably still there afterwards. Real tmux cannot be made to accept a
+# kill-window and leave the window alive, so blocking the call is the only way
+# to reach that state against a real endpoint.
+# The socket stays a RELATIVE name reached from <dir>, matching the isolated
+# case above: this fixture's absolute path is longer than a unix socket path
+# may be on macOS.
+write_close_failing_tmux_shim() {  # <dir> <socket-name> <real-tmux>
+  local dir=$1 socket=$2 real=$3
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+set -u
+printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
+printf '\n' >> "\${FM_RUNTIME_LOG:?}"
+if [ -n "\${FM_TEST_BLOCK_KILL:-}" ] && [ "\${1:-}" = kill-window ]; then
+  echo "can't find window" >&2
+  exit 1
+fi
+cd '$dir'
+exec '$real' -S '$socket' "\$@"
+SH
+  chmod +x "$dir/fakebin/tmux"
+}
+
+test_failed_endpoint_close_refuses_before_removing_the_record() {
+  local dir socket session='close failure' id=strand-task rc
+  [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
+  dir=$(make_case close-failure)
+  socket=dedicated.sock
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-session -d -s "$session" -n control )
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-window -d -t "=$session:" -n "fm-$id" )
+  write_close_failing_tmux_shim "$dir" "$socket" "$REAL_TMUX"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id" \
+    || fail "fixture did not create the task window"
+
+  # A worktree and project that do not exist keep this case on the endpoint
+  # close: the pool return and its own refusals are covered elsewhere.
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/nonexistent-worktree" "project=$dir/nonexistent-project" \
+    "kind=scout" "mode=no-mistakes"
+
+  set +e
+  env -u TMUX -u TMUX_PANE FM_TEST_BLOCK_KILL=1 \
+    FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_RUNTIME_LOG="$dir/runtime.log" \
+    PATH="$dir/fakebin:$PATH" "$TEARDOWN" "$id" --force \
+    > "$dir/failed.out" 2> "$dir/failed.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "teardown reported success after a close that failed: $(cat "$dir/failed.err")"
+  assert_no_grep "teardown $id complete" "$dir/failed.out" \
+    "teardown announced a completed cleanup after a close that failed"
+  assert_grep "kill-window" "$dir/runtime.log" "teardown never attempted the recorded close"
+  assert_grep "is still present after its close" "$dir/failed.err" \
+    "the backend's own close failure was swallowed instead of reported"
+  assert_grep "could not be closed" "$dir/failed.err" \
+    "teardown did not refuse on the reported close failure"
+  # The refusal exists so the endpoint is not STRANDED: the record is the only
+  # thing naming what survived, so it has to outlive the refusal.
+  assert_present "$dir/home/state/$id.meta" \
+    "teardown deleted the only durable record naming an endpoint it could not close"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id" \
+    || fail "the surviving endpoint disappeared, so this case no longer proves the hazard"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" control \
+    || fail "the refused cleanup removed an independent window"
+
+  # Same task, same records, with the close working again: the retained record
+  # is what lets the rerun finish, so the refusal is recoverable, not terminal.
+  env -u TMUX -u TMUX_PANE \
+    FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_RUNTIME_LOG="$dir/runtime.log" \
+    PATH="$dir/fakebin:$PATH" "$TEARDOWN" "$id" --force \
+    > "$dir/rerun.out" 2> "$dir/rerun.err" \
+    || fail "the rerun after a recovered close still failed: $(cat "$dir/rerun.err")"
+  assert_absent "$dir/home/state/$id.meta" "the recovered rerun left the task record behind"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id" \
+    && fail "the recovered rerun did not close the recorded endpoint"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" control \
+    || fail "the recovered rerun removed an independent window"
+
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
+  pass "fm-teardown: a close that genuinely failed refuses and keeps the record naming the surviving endpoint, and the same teardown finishes once the close works"
+}
+
+test_already_gone_endpoint_still_completes_without_a_refusal() {
+  local dir socket session='already gone' id=gone-task
+  [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
+  dir=$(make_case already-gone)
+  socket=dedicated.sock
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-session -d -s "$session" -n control )
+  write_close_failing_tmux_shim "$dir" "$socket" "$REAL_TMUX"
+  # The whole point of this case: the recorded window has already exited, so
+  # its close cannot succeed and must still be the ordinary silent cleanup.
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id" \
+    && fail "the already-gone fixture unexpectedly has its task window"
+
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/nonexistent-worktree" "project=$dir/nonexistent-project" \
+    "kind=scout" "mode=no-mistakes"
+
+  env -u TMUX -u TMUX_PANE \
+    FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_RUNTIME_LOG="$dir/runtime.log" \
+    PATH="$dir/fakebin:$PATH" "$TEARDOWN" "$id" --force \
+    > "$dir/gone.out" 2> "$dir/gone.err" \
+    || fail "an already-exited endpoint refused cleanup: $(cat "$dir/gone.err")"
+  assert_grep "teardown $id complete" "$dir/gone.out" \
+    "an already-exited endpoint did not report a completed cleanup"
+  assert_no_grep "could not be closed" "$dir/gone.err" \
+    "an already-exited endpoint produced a close refusal"
+  assert_no_grep "is still present after its close" "$dir/gone.err" \
+    "an already-exited endpoint was reported as a surviving endpoint"
+  assert_absent "$dir/home/state/$id.meta" \
+    "an already-exited endpoint left its task record behind"
+
+  # A server that is already gone entirely is the same ordinary case, and the
+  # adapter is driven directly so no other teardown refusal can stand in for it.
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
+  # shellcheck disable=SC2016 # $1 and $2 expand inside the isolated child shell.
+  env -u TMUX -u TMUX_PANE FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    bash -c '. "$1/bin/fm-backend.sh"; fm_backend_kill tmux "$2"' _ "$ROOT" "$session:fm-$id" \
+    > "$dir/deadserver.out" 2> "$dir/deadserver.err" \
+    || fail "closing an endpoint whose whole server is gone reported a failure: $(cat "$dir/deadserver.err")"
+  [ ! -s "$dir/deadserver.err" ] \
+    || fail "closing an endpoint whose whole server is gone was not silent: $(cat "$dir/deadserver.err")"
+
+  pass "fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently"
+}
+
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation
 test_non_pool_teardown_ignores_task_set_lock
@@ -980,6 +1112,8 @@ test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact
 test_isolated_tmux_invalid_and_valid_cleanup
+test_failed_endpoint_close_refuses_before_removing_the_record
+test_already_gone_endpoint_still_completes_without_a_refusal
 test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task
 test_cross_home_pool_slot_collision_refuses

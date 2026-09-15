@@ -121,9 +121,21 @@ fm_backend_tmux_send_literal() {  # <target> <text>
   tmux send-keys -t "$1" -l "$2"
 }
 
-# fm_backend_tmux_kill: remove one explicitly named task window, best-effort.
+# fm_backend_tmux_kill: remove one explicitly named task window.
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.
+#
+# A close that did not succeed is resolved, never assumed: `kill-window` fails
+# for the ordinary already-exited window exactly as it does for a window that
+# is still there, so its status alone cannot tell a benign cleanup from a
+# stranded endpoint. The re-read below settles which one happened, under the
+# window's EXACT recorded identity (`=session` plus a whole-line name match -
+# never a prefix, which would read a neighbor as this window's survivor).
+# Only a window still present under that identity means the kill could not do
+# its job; an already-gone window, and a whole server that is already gone,
+# stay a silent success. Verified against real tmux 3.7c: killing a live
+# window, re-killing the same gone window, and killing into a dead session all
+# return 0 here (docs/verification/runtime-backends.md "Endpoint close").
 fm_backend_tmux_kill() {  # <target>
   local target=${1:-} session window
   case "$target" in
@@ -136,7 +148,11 @@ fm_backend_tmux_kill() {  # <target>
   case "$session:$window" in
     :*|*:|*:*:*) return 1 ;;
   esac
-  tmux kill-window -t "=$session:=$window" 2>/dev/null || true
+  tmux kill-window -t "=$session:=$window" 2>/dev/null && return 0
+  tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null \
+    | grep -qxF -- "$window" || return 0
+  echo "error: tmux window $session:$window is still present after its close" >&2
+  return 1
 }
 
 # fm_backend_tmux_current_command: <target>'s live foreground process name -

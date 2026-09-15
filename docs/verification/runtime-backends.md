@@ -331,6 +331,39 @@ Valid cleanup removed only the exact task-bound target and left the control wind
 The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
 Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
 
+### Endpoint close
+
+A reported close failure costs teardown every durable record of the task, so what each backend's close actually returns was measured before that status was given any authority.
+Verified on 2026-09-14 with tmux 3.7c by driving `fm_backend_kill` against real endpoints and against each adapter with its CLI absent.
+
+```sh
+tests/fm-teardown-endpoint-safety.test.sh
+```
+
+```text
+ok - fm-teardown: a close that genuinely failed refuses and keeps the record naming the surviving endpoint, and the same teardown finishes once the close works
+ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
+```
+
+An endpoint that is already legitimately gone returns 0 silently on every arm, so ordinary cleanup of an already-exited session is unchanged: real tmux returns 0 for a live window, for a re-close of that same gone window, and for a close into a session whose whole server has exited.
+The refusal is reached only through a close that could not do its job, and each arm reports only what it can prove:
+
+| Backend | already gone | a close that failed |
+| --- | --- | --- |
+| tmux | 0, silent | 1, resolved by re-reading the window's exact recorded identity |
+| orca | 0, silent | 1 when a missing CLI means no close was attempted; 0 for a close command that failed after the CLI accepted it |
+| zellij | 0, silent | 0, not yet distinguishable |
+| cmux | 0, silent | 0, not yet distinguishable |
+| herdr | 0, silent | 0 from this arm; `bin/fm-teardown.sh` gates every Herdr record removal on `fm_backend_herdr_endpoint_confirmed_gone` instead |
+
+The three arms that still report 0 need a presence re-read taken after their own close, and the close-then-read timing that re-read depends on cannot be established without the real Zellij, Orca, and cmux binaries.
+Guessing it is what a refusal must never rest on: a gate that refused an already-exited session would break ordinary cleanup on every task, which is a worse failure than the stranded endpoint it would be trying to prevent.
+tmux's re-read is deliberately exact - `=session` plus a whole-line window-name match - because a prefix match would read a neighboring window as this window's survivor, which is the same exactness the cleanup identity boundary above already requires.
+
+Both directions are proven non-vacuous.
+Restoring the swallowed status makes the refusal case report `teardown <id> complete`, delete the endpoint record, and leave the window live.
+Keeping the refusal but dropping the exact re-read makes an already-exited endpoint refuse its own cleanup, and also fails the cleanup identity case above.
+
 ## Claude workspace trust
 
 Verified 2026-09-03 on Claude Code 2.1.259.
