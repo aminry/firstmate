@@ -2622,6 +2622,11 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
     'captain-held: which retention window wins' 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   write_away_record "$state"
+  # Backdated far past the escalation threshold, so the absorb below is reached
+  # with a timer whose restart is visible: the evidence consult that reaches this
+  # branch is the costly read of the pair, and an absorb that left the timer
+  # alone would repeat it on every poll for the whole away window.
+  printf '%s\n' "$(( $(date +%s) - 2000 ))" > "$state/.stale-since-$key"
   n=1
   while [ "$n" -le 3 ]; do
     FM_TEST_PAUSE_RESURFACE=240 wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$working" absorb \
@@ -2638,9 +2643,17 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
     || fail "an away-silenced hold counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
   grep -F 'never rechecked while the away-posture record exists' "$state/.watch-triage.log" >/dev/null \
     || fail "the away-silenced hold was not recorded in the triage log: $(cat "$state/.watch-triage.log")"
+  [ "$(( $(date +%s) - $(cat "$state/.stale-since-$key") ))" -lt 120 ] \
+    || fail "an away-silenced absorb left the idle timer at $(cat "$state/.stale-since-$key"), so the evidence consult would be re-taken on every poll for the whole away window"
 
   # And the recheck returns once the captain is back, so the hold is not lost.
+  # The away-silenced absorb restarts the idle timer like every other deferral
+  # here, so the on-return leg would otherwise race the threshold: backdate the
+  # timer past it rather than leave the leg to depend on how long the rounds
+  # above happened to take. What is under test is that the recheck is owed at
+  # all once the record is archived, not how many seconds it waits for it.
   archive_away_record "$state"
+  printf '%s\n' "$(( $(date +%s) - 2000 ))" > "$state/.stale-since-$key"
   : > "$out"
   FM_TEST_PAUSE_RESURFACE=240 wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$working" exit \
     || fail "a captain-held lane was never rechecked after the away-posture record was archived: $(cat "$out")"
@@ -2847,22 +2860,29 @@ resolved: the captain chose the second fix [key=gate-1]' 2000)
 }
 
 # --- a wait record that does not carry every field is refused ----------------
-# wait_record joins its fields with TABs and wedge_defer_wait parses them with
-# `IFS=<tab> read`. TAB is an IFS WHITESPACE character, so consecutive tabs
-# collapse: a record with an empty middle field does not fail to parse, it SHIFTS
-# - an empty subject puts `whom` where the subject is read and the prose action
-# where `whom` is read, so the away-posture test inspects a sentence and the
-# recheck prints an action that clears nothing. Deferring is what takes the
-# ladder away, so an unparseable record must fall back to the escalation the
-# caller was about to make instead.
-# No shipped evidence producer can emit a half-filled record, which is precisely
+# wait_record joins its five fields with US and wedge_defer_wait parses them with
+# `IFS=<us> read`, so consecutive delimiters yield genuinely EMPTY fields and no
+# field can shift left into another's position. That is what makes the deferral's
+# guard able to enforce the whole contract rather than a position-specific slice
+# of it: each field the recheck prints must be present, and a record carrying
+# more than its four delimiters is refused too, since `read` puts any surplus
+# into the final variable. Deferring on a record that is not what it claims is
+# what takes the ladder away, so every one of these must fall back to the
+# escalation the caller was about to make instead.
+# No shipped evidence producer can emit a malformed record, which is precisely
 # the invariant under test, so this loads the real bin/fm-watch.sh through its
 # own source guard in a child shell (the entry tests/fm-supervision-events.test.sh
 # uses) and drives the real wedge_timer_check. The assertion is on the durable
 # wake queue the watcher actually wrote.
-test_wedge_defer_refuses_a_half_filled_wait_record() {
-  local dir state out
-  dir=$(make_case malformed-wait-record); state="$dir/state"
+
+# One wedge_timer_check round against a malformed record. <evidence-body> is the
+# body of a wedge_wait_evidence override, so a case supplies exactly the record
+# under test. Publishes the state directory it ran in as MALFORMED_STATE rather
+# than on stdout, because fail() exits the shell it runs in and a command
+# substitution would swallow a setup failure here.
+run_malformed_wait_record_round() {  # <name> <evidence-body>
+  local name=$1 body=$2 dir state out
+  dir=$(make_case "$name"); state="$dir/state"
   printf 'working: validation under way\n' > "$state/wedge.status"
   printf '%s\n' "$(( $(date +%s) - 600 ))" > "$state/.stale-since-test_fm-wedge"
 
@@ -2873,21 +2893,47 @@ test_wedge_defer_refuses_a_half_filled_wait_record() {
       # shellcheck disable=SC1090,SC1091
       . "$1"
       wake() { :; }
-      wedge_wait_evidence() {
-        wait_record "declared wait" "" external "confirm the wait still holds" ""
-      }
+      eval "wedge_wait_evidence() { $2 ; }"
       wedge_timer_check "test:fm-wedge" "$FM_STATE_OVERRIDE/.stale-since-test_fm-wedge" \
         "non-terminal stale" "$FM_STATE_OVERRIDE/.wedge-escalations-test_fm-wedge" wedge
-    ' _ "$WATCH" > "$out" 2>&1 \
-    || fail "the wedge timer failed on a malformed wait record: $(cat "$out")"
+    ' _ "$WATCH" "$body" > "$out" 2>&1 \
+    || fail "the wedge timer failed on a malformed wait record ($name): $(cat "$out")"
+  MALFORMED_STATE=$state
+}
 
+assert_malformed_record_kept_the_ladder() {  # <state> <what>
+  local state=$1 what=$2
   grep -F 'possible wedge, escalation 1' "$state/.wake-queue" >/dev/null \
-    || fail "a malformed wait record did not keep the unchanged ladder: $(cat "$state/.wake-queue" 2>/dev/null)"
+    || fail "$what did not keep the unchanged ladder: $(cat "$state/.wake-queue" 2>/dev/null)"
   grep -F 'rechecked on a long cadence not a wedge' "$state/.wake-queue" >/dev/null \
-    && fail "a malformed wait record was deferred on shifted fields: $(cat "$state/.wake-queue")"
+    && fail "$what was deferred on a record that is not what it claims: $(cat "$state/.wake-queue")"
   [ "$(cat "$state/.wedge-escalations-test_fm-wedge" 2>/dev/null || echo 0)" -eq 1 ] \
-    || fail "a malformed wait record did not count its escalation"
-  pass "a wait record missing a field the recheck must print is refused, and the lane escalates exactly as it would have"
+    || fail "$what did not count its escalation"
+}
+
+test_wedge_defer_refuses_a_half_filled_wait_record() {
+  # An empty subject - the field whose loss used to shift the prose action into
+  # `whom` and print an action that clears nothing.
+  run_malformed_wait_record_round malformed-wait-record \
+    'wait_record "declared wait" "" external "confirm the wait still holds" ""'
+  assert_malformed_record_kept_the_ladder "$MALFORMED_STATE" "a wait record with no subject"
+
+  # An empty ACTION with a non-empty anchor. Under the old TAB join this parsed
+  # as a valid record: the doubled tab collapsed, the anchor path slid into
+  # `action`, and the recheck published a status-file path as the one thing that
+  # clears the lane while silently losing the wait-age anchor.
+  run_malformed_wait_record_round malformed-wait-record-no-action \
+    "wait_record 'declared wait' 'awaiting external' external '' '$TMP_ROOT/anchor.status'"
+  assert_malformed_record_kept_the_ladder "$MALFORMED_STATE" "a wait record with no action"
+
+  # A record carrying a surplus delimiter: `read` puts everything past the last
+  # field into `anchor`, so the fields after the extra one are not the fields
+  # they are read as.
+  run_malformed_wait_record_round malformed-wait-record-surplus \
+    'printf "%s\\037%s\\037%s\\037%s\\037%s\\037%s" "declared wait" "awaiting external" external "confirm the wait still holds" "" extra'
+  assert_malformed_record_kept_the_ladder "$MALFORMED_STATE" "a wait record with a surplus field"
+
+  pass "a wait record missing a field the recheck must print, or carrying one it must not, is refused and the lane escalates exactly as it would have"
 }
 
 

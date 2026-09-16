@@ -344,10 +344,26 @@ nm_gate_findings_count() {
 # actions, and the payload also carries the branch name and step names, so a
 # gate owed the crewmate's own answer would match just as readily as one owed a
 # human. Column order is read from the header rather than assumed, so a table
-# that grows a column keeps answering correctly, and every field before `action`
-# is a short scalar, which is what makes walking commas to that index sound.
+# that grows a column keeps answering correctly.
+#
+# Reading the index out of the header and then walking RAW COMMAS to it is only
+# positional in name: the walk is sound only while every column before `action`
+# is comma-free, and the producer does not quote commas inside `description`
+# (tests/fm-crew-state.test.sh's own fixture proves it). A header ordering that
+# puts free text before `action` would therefore let a row's description mint
+# the marker - silently, with no error - which is the same class of hole the
+# positional derivation exists to close, arriving by a different route. So the
+# columns preceding `action` are checked against a WHITELIST of names this table
+# is known to carry as short comma-free scalars, and anything else refuses:
+# a whitelist rather than a blacklist of free-text names, because an unknown
+# column must read as unsafe rather than as safe. When the table's shape is not
+# provably safe the correct answer is the noisy one - a crewmate that went quiet
+# before answering its own gate is the failure that must never be silenced.
+# Residual bound, which no unquoted positional parse of this table escapes: a
+# comma inside a whitelisted field's own value (a path with a comma in it, say)
+# still shifts the walk.
 nm_gate_awaits_human_decision() {
-  local header count cols idx i field rows row rest
+  local header count cols idx i name field rows row rest
   header=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*findings\[[0-9]+\]\{[^}]*\}:' | head -1)
   [ -n "$header" ] || return 1
   count=$(printf '%s' "$header" | sed -n 's/^[[:space:]]*findings\[\([0-9][0-9]*\)\].*/\1/p')
@@ -359,7 +375,12 @@ nm_gate_awaits_human_decision() {
   i=0
   while [ -n "$cols" ]; do
     i=$((i + 1))
-    if [ "$(strip_quotes "$(trim "${cols%%,*}")")" = action ]; then idx=$i; break; fi
+    name=$(strip_quotes "$(trim "${cols%%,*}")")
+    if [ "$name" = action ]; then idx=$i; break; fi
+    case "$name" in
+      id|severity|file|line) ;;
+      *) return 1 ;;
+    esac
     case "$cols" in *,*) cols=${cols#*,} ;; *) cols='' ;; esac
   done
   [ "$idx" -gt 0 ] || return 1

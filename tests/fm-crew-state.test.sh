@@ -373,6 +373,27 @@ gate: review
 EOF
 }
 
+# The same crewmate-owed gate with `description` placed BEFORE `action` in the
+# header. Every row's real action column is auto-fix, but one description spells
+# the token out surrounded by commas at exactly the comma offset the `action`
+# index lands on, so a derivation that reads the index from the header and then
+# walks raw commas to it accepts free text as the action. The table's shape is
+# not provably safe here, so the only correct answer is to keep the ladder.
+run_parked_free_text_before_action() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[1]{id,severity,file,line,description,action}:
+    r1,warning,a.go,12,the action field is one of auto-fix, ask-user,auto-fix
+gate: review
+EOF
+}
+
 run_parked_scalar_gate_running() {  # <branch>
   cat <<EOF
 run:
@@ -785,6 +806,29 @@ test_parked_human_decision_comes_from_the_action_column() {
   out=$(run_crew_state "$d" feat-ar)
   assert_contains "$out" " · ask-user: authority decision" \
     "the action column is located by header index, not by fixed position"
+
+  # A header index alone is not enough, because the row is split on raw commas.
+  # With `description` ahead of `action` the comma walk lands inside free text,
+  # so a gate whose every action is auto-fix would mint the component. The table
+  # is not provably safe to walk, so the derivation must refuse and the crewmate
+  # must keep the wedge ladder.
+  reset_fakes
+  d=$(new_case parked-free-text-before-action)
+  make_repo_on_branch "$d/wt" fm/feat-af
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-af.meta" "window=fm:fm-feat-af" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-af.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_free_text_before_action fm/feat-af)"
+  # Non-vacuity: the payload must really carry the token at the comma offset the
+  # `action` index resolves to, or the case below proves nothing.
+  assert_contains "$FM_FAKE_AXI_STATUS" "findings[1]{id,severity,file,line,description,action}:" \
+    "the fixture must really place free text before the action column"
+  assert_contains "$FM_FAKE_AXI_STATUS" ", ask-user," \
+    "the fixture description must carry the token where the comma walk would accept it"
+  out=$(run_crew_state "$d" feat-af)
+  assert_contains "$out" "state: parked" "an unsafe findings header still reports parked"
+  assert_not_contains "$out" " · ask-user: authority decision" \
+    "a findings header that puts free text before action must not mint the human-decision component"
   pass "the parked human-decision component is derived from the findings table's action column"
 }
 

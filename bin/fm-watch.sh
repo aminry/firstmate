@@ -933,8 +933,14 @@ wedge_defer_writing() {  # <window> <since-file> <triage-label> <idle-age>
 #                degraded one: a gate the pipeline parked was never written down
 #                by the worker, so there is no honest age to publish and the
 #                deferral publishes none.
+# The fields are joined with US (\037) rather than TAB because TAB is an IFS
+# WHITESPACE character: consecutive tabs collapse under `read`, so a record with
+# an empty middle field would not fail to parse, it would SHIFT every later field
+# left into another field's position. US is not IFS whitespace, so consecutive
+# delimiters yield genuinely empty fields and the record either parses as written
+# or fails the deferral's guard.
 wait_record() {  # <kind> <subject> <whom> <action> <age-record>
-  printf '%s\t%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4" "$5"
+  printf '%s\037%s\037%s\037%s\037%s' "$1" "$2" "$3" "$4" "$5"
 }
 
 # The evidence that a quiet pane is a BOUNDED WAIT rather than a wedge suspect,
@@ -1038,39 +1044,53 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
 # exists: the one human who can answer it is away, the return brief already lists
 # it, and every other captain-facing path in this file absorbs it silently for
 # that reason (handle_paused_stale, surface_nonterminal_stale,
-# captain_call_stale_bound). That absorb arms no throttle, so the recheck is owed
-# in full the moment the record is archived rather than starting a cadence nobody
-# could act on.
+# captain_call_stale_bound). That absorb arms no re-surface throttle and emits no
+# wake, so the recheck is owed once the record is archived rather than starting a
+# cadence nobody could act on. It does restart the idle timer, exactly as every
+# other deferral here does, because the evidence consult that reached it is the
+# costly read of the pair and an absorb that left the timer alone would repeat
+# that read on every poll for the whole away window. The consequence is the
+# bound stated plainly: the recheck owed on return arrives within one
+# STALE_ESCALATE_SECS of the record being archived rather than instantly.
 # The escalation counter is left alone, exactly as the write deferral leaves it:
 # this is not an escalation, and a later genuine one must keep the
 # demand-inspection history it had already earned.
 wedge_defer_wait() {  # <window> <since-file> <triage-label> <idle-age> <wait-record>
   local win=$1 since_file=$2 label=$3 age=$4 record=$5
-  local kind subject whom action anchor key mtime wage min_age waited
-  IFS=$(printf '\t') read -r kind subject whom action anchor <<EOF
+  local kind subject whom action anchor key mtime wage min_age waited us ok
+  us=$(printf '\037')
+  IFS=$us read -r kind subject whom action anchor <<EOF
 $record
 EOF
-  # Enforce here what the record's own contract claims, because `read` cannot:
-  # TAB is an IFS whitespace character, so a record with an empty middle field
-  # collapses rather than failing and every later field shifts left - an empty
-  # subject would put the prose action where `whom` is read and print an action
-  # that does not clear the lane. Only `anchor` may legitimately be empty. A
-  # record that fails this is refused rather than deferred on shifted fields:
-  # deferring is what takes the ladder away, so the unparseable case must fall
-  # back to the escalation the caller was about to make.
+  # Enforce the whole of the record's own contract here, which the US delimiter
+  # now makes checkable: `kind`, `subject`, `whom` and `action` are each a field
+  # the recheck prints and must be non-empty, `whom` is exactly one of the two
+  # values the away-posture rule below tests for, only `anchor` may legitimately
+  # be empty, and the record holds exactly four delimiters - a surplus one is
+  # visible because `read` puts everything past the last field into `anchor`.
+  # A record that fails any of these is refused rather than deferred: deferring
+  # is what takes the ladder away, so the unparseable case must fall back to the
+  # escalation the caller was about to make.
+  ok=1
   case "$whom" in
     captain|external) ;;
-    *) triage_log "refused a malformed wait record for $label: $win"; return 1 ;;
+    *) ok=0 ;;
   esac
-  if [ -z "$kind" ] || [ -z "$subject" ] || [ -z "$action" ]; then
+  case "$anchor" in
+    *"$us"*) ok=0 ;;
+  esac
+  if [ -z "$kind" ] || [ -z "$subject" ] || [ -z "$action" ]; then ok=0; fi
+  if [ "$ok" -eq 0 ]; then
     triage_log "refused a malformed wait record for $label: $win"
     return 1
   fi
+  key=$(window_key "$win")
   if [ "$whom" = captain ] && afk_record_present; then
+    clear_write_tracking "$key"
+    date +%s > "$since_file"
     triage_log "absorbed $label ($kind, never rechecked while the away-posture record exists): $win"
     return 0
   fi
-  key=$(window_key "$win")
   mtime=''
   [ -n "$anchor" ] && mtime=$(stat_mtime "$anchor")
   case "$mtime" in
@@ -1115,9 +1135,11 @@ clear_write_tracking() {  # <window-key>
 # active run/busy pane outranked).
 # The wait-evidence consult (wedge_wait_evidence) and the worktree write probe
 # run ONLY here, inside the at-threshold branch that is about to escalate: at
-# most one each per window per STALE_ESCALATE_SECS, never per poll. Ordinary
-# polls still never re-read the crew state; the one re-read wedge_wait_evidence
-# may take is bounded by that same threshold. The wait consult runs first,
+# most one each per window per STALE_ESCALATE_SECS, never on an ordinary poll.
+# That bound is what every deferral below preserves by restarting the idle timer,
+# the away-silenced absorb in wedge_defer_wait included, so the crew-state read
+# wedge_wait_evidence may take is taken at most once per window per
+# STALE_ESCALATE_SECS however long the wait lasts. The wait consult runs first,
 # because a pane that can account for its own quiet has nothing to prove through
 # its worktree.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task>
