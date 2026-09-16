@@ -1,0 +1,111 @@
+live driver for the declared-wait wedge deferral
+watcher under test : /tmp/fm-base-repo/bin/fm-watch.sh
+watcher commit     : (base tree bdcacb9, pre-fix)
+crewmate window    : fleet:fm-crew-validate
+wedge threshold    : FM_STALE_ESCALATE_SECS=1 (the 240s default only changes how long each round takes)
+
+========================================================================
+S1  a crewmate that declared a bounded wait is not wedge-escalated (#3909)
+========================================================================
+crewmate's own last status line:
+    paused: final validation at step 6/6 - clean whole-assembly baseline (~20 min)
+driving three consecutive idle windows past the escalation threshold...
+    FAIL  watcher stayed supervising across three thresholds (never surfaced a wedge)
+    FAIL  no stale wake queued for the captain
+    FAIL  nothing reported as a possible wedge
+    FAIL  no wedge escalation counted
+what the watcher recorded instead (triage log):
+
+========================================================================
+S2  the declared wait is rechecked on the long cadence, naming the external dependency
+========================================================================
+crewmate's own last status line (declared 2000s ago):
+    paused: waiting on the upstream release cut
+    PASS  watcher surfaced the recheck once the wait outlived the cadence
+what the captain sees:
+    stale: fleet:fm-crew-validate (idle 1s, possible wedge, escalation 1)
+    FAIL  recheck names the wait as declared and owed by an external dependency
+    FAIL  recheck names the action that resolves it
+    FAIL  recheck is worded as a recheck, not a wedge
+    FAIL  no possible-wedge wording
+    PASS  did not borrow the captain-held action
+    FAIL  published wait age (s) is the age of the declaration itself
+
+========================================================================
+S3  ADVERSARIAL: a lane with no declaration keeps the unchanged ladder and wording
+========================================================================
+crewmate's own last status line (no declared wait):
+    working: validation under way
+    PASS  escalated on every threshold, escalation 1 -> 2 -> 3, on the unchanged schedule
+    PASS  demand-deep-inspection wording intact at the third escalation
+what the captain sees:
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 1)
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 2)
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+
+========================================================================
+S4  ADVERSARIAL: a declared wait whose own clearing time already passed escalates as before
+========================================================================
+crewmate's own last status line (clearing time two hours in the past):
+    paused: waiting on the build queue until 2026-09-15T21:56:51Z
+    PASS  watcher surfaced rather than deferring an expired declaration
+what the captain sees:
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 1)
+    PASS  unchanged wedge wording and escalation count
+
+========================================================================
+S5  a captain-held transfer is rechecked as a hold ON THE CAPTAIN, not an external wait
+========================================================================
+crewmate's own last status line:
+    captain-held: which retention window wins
+    PASS  watcher surfaced the hold recheck
+what the captain sees:
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 1)
+    FAIL  recheck names the captain as the human the wait is on
+    FAIL  recheck names the action that clears the hold
+    PASS  not published as a wait on an external dependency
+    FAIL  not reported as a possible wedge
+
+========================================================================
+S6  ADVERSARIAL: while the captain is away a hold is silent, and the recheck returns intact
+========================================================================
+away-posture record written; driving three idle windows past the threshold...
+    FAIL  watcher stayed supervising, never woke the away captain
+    FAIL  no stale wake queued
+    FAIL  nothing printed to the captain
+    PASS  no recheck throttle armed, so the recheck is owed in full on return
+what the watcher recorded instead (triage log):
+away-posture record archived (captain is back); driving one more idle window...
+    PASS  the hold was rechecked immediately on return, not after another cadence
+what the returning captain sees:
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 4, demand-deep-inspection: same pane has wedge-escalated 4 times in a row - do not re-absorb on the run-step/pane state alone)
+    FAIL  the recheck owed on return still names the captain
+
+========================================================================
+S7  ADVERSARIAL: the declaration still wins when the pane display churns every capture
+========================================================================
+crewmate's own last status line:
+    paused: waiting on the nightly index rebuild
+driving six idle windows against a pane whose text changes on every capture...
+    PASS  a churning declared-wait lane is never reported as a possible wedge
+    PASS  no demand-deep-inspection marker
+    PASS  no wedge escalation counted
+what the captain sees (the stated bound: rechecked once per idle window, never escalated):
+
+========================================================================
+S8  ADVERSARIAL: withdrawing the declaration restores the unchanged escalation
+========================================================================
+crewmate's own last status line:
+    paused: waiting on the upstream release cut
+    FAIL  while the wait stands the lane is deferred, not escalated
+    FAIL  nothing reported as a possible wedge while the wait stands
+the crewmate withdraws the wait and reports working again:
+    working: the release landed, resuming validation
+    PASS  the very next idle window escalates again
+what the captain sees:
+    stale: fleet:fm-crew-validate (idle 2s, possible wedge, escalation 2)
+    FAIL  unchanged wedge wording, escalation count starting from 1
+
+========================================================================
+RESULT: 19 check(s) failed
+========================================================================

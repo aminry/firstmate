@@ -1,0 +1,1 @@
+stale: fleet:fm-crew-validate (idle 1s, waiting 2002s - declared wait, awaiting external, rechecked on a long cadence not a wedge; confirm the wait still holds)

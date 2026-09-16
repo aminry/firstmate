@@ -1,0 +1,16 @@
+daemon under test : /Users/amin/.no-mistakes/worktrees/041bc5e421de/01M2KP4KYEVBZRJZ44E33K1G73/bin/fm-supervise-daemon.sh
+crewmate window   : fleet:fm-crew-validate
+
+state before the crewmate withdraws its wait:
+    .paused-fleet_fm-crew-validate
+    .paused-rechecked-fleet_fm-crew-validate
+    .waiting-resurfaced-fleet_fm-crew-validate
+
+the crewmate withdraws the wait: "working: the release landed, resuming validation"
+away-mode daemon reconciles the lane against that new status line...
+
+state after reconciliation:
+    (no pause or wait bookkeeping left for this lane)
+
+    PASS  the wait-recheck throttle was cleared with the rest of the lane pause state,
+          so the next wait episode on this lane is rechecked from its first window

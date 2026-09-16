@@ -1,0 +1,16 @@
+daemon under test : /tmp/fm-base-repo/bin/fm-supervise-daemon.sh
+crewmate window   : fleet:fm-crew-validate
+
+state before the crewmate withdraws its wait:
+    .paused-fleet_fm-crew-validate
+    .paused-rechecked-fleet_fm-crew-validate
+    .waiting-resurfaced-fleet_fm-crew-validate
+
+the crewmate withdraws the wait: "working: the release landed, resuming validation"
+away-mode daemon reconciles the lane against that new status line...
+
+state after reconciliation:
+    .waiting-resurfaced-fleet_fm-crew-validate
+
+    FAIL  the wait-recheck throttle survived the withdrawn declaration;
+          the next unrelated wait episode on this lane would lose its first recheck
