@@ -40,10 +40,11 @@
 #                          wake payload itself, not just repetition, forces a
 #                          closer look instead of another routine supervision
 #                          resume. Unless afk is active. A pane about to escalate
-#                          whose worker declared why it is quiet - a `paused:`
-#                          external wait or a verified `captain-held` transfer -
-#                          is deferred to that same long recheck cadence instead
-#                          (wedge_wait_evidence), and a pane whose own task
+#                          that can account for its quiet - a `paused:` external
+#                          wait or a verified `captain-held` transfer its worker
+#                          declared, or a validation gate of its own awaiting a
+#                          human decision - is deferred to that same long recheck
+#                          cadence instead (wedge_wait_evidence), and a pane whose own task
 #                          worktree was written during the quiet window is
 #                          deferred rather than escalated (wedge_defer_writing),
 #                          because files appearing there are liveness the pane and
@@ -916,10 +917,31 @@ wedge_defer_writing() {  # <window> <since-file> <triage-label> <idle-age>
   triage_log "absorbed $label (worktree written since the idle window opened, idle ${age}s): $win"
 }
 
+# One wait record, carrying every field a recheck needs to be correct. Emitting
+# them together is the point: a recheck that names the wrong human, or asks for
+# an action that does not clear the lane, points the reader away from the only
+# person who can end the wait, so a new kind of evidence must not be able to
+# reach wedge_defer_wait without deciding all of them.
+#   <kind>       what the evidence IS, as the recheck names it.
+#   <subject>    WHO the wait is on, in the recheck's own words.
+#   <whom>       `captain` when that subject is the captain, `external`
+#                otherwise; this is what applies the away-posture rule below.
+#   <action>     the one thing that clears the lane.
+#   <age-record> the file whose mtime is when this wait started, or EMPTY when
+#                the wait has no written record. Empty is a real answer, not a
+#                degraded one: a gate the pipeline parked was never written down
+#                by the worker, so there is no honest age to publish and the
+#                deferral publishes none.
+wait_record() {  # <kind> <subject> <whom> <action> <age-record>
+  printf '%s\t%s\t%s\t%s\t%s' "$1" "$2" "$3" "$4" "$5"
+}
+
 # The evidence that a quiet pane is a BOUNDED WAIT rather than a wedge suspect,
 # read at the one moment it decides anything: when an escalation is about to
-# fire. The worker's own status line is that evidence - a declared `paused:`
-# external wait, or a verified `captain-held` transfer.
+# fire. Two records answer it, and they are independent: the worker's own status
+# line - a declared `paused:` external wait, or a verified `captain-held`
+# transfer - and, when that line explains nothing, the crew's authoritative
+# current state.
 #
 # The generated brief promises that declaring one buys the long recheck cadence
 # instead of a wedge, and the wedge timer is reachable while that declaration
@@ -931,75 +953,101 @@ wedge_defer_writing() {  # <window> <since-file> <triage-label> <idle-age>
 #
 # A declared clearing time that has ALREADY passed (`paused: ... until <t>`) is
 # not evidence: the wait the worker described is over, so it no longer explains
-# the silence, and the pane keeps the unchanged schedule.
-# Nothing here weakens detection for a pane with no declaration - it never runs
-# for them beyond one status-line read, and their escalation schedule, reason and
-# wording are untouched.
-# WHICH verb declared it is printed, not just that one did, because the caller
-# must not re-derive it: the two block on DIFFERENT humans - `paused:` on an
-# external dependency the worker named, `captain-held:` on the captain themself -
-# so a recheck that named the wrong one would point the reader away from the
-# person who can clear it.
-wedge_wait_evidence() {  # <task> -> `declared` or `held` on stdout
-  local task=$1 last until
+# the silence, and the pane keeps the unchanged schedule. The records are read in
+# this order rather than pooled because the routing already guarantees it is the
+# right one: a pane whose last line is `paused:` or `captain-held:` reaches this
+# timer only through pause_state_class answering `working`, so its crew state is
+# a running step, never a parked gate.
+#
+# The second record is the crew's authoritative current state, consulted when the
+# status line accounts for nothing: a no-mistakes gate whose answer is owed by a
+# HUMAN (crew_gate_awaits_human_decision in fm-classify-lib.sh, minted from the
+# findings table's `action` column by position). A gate awaiting the CREWMATE's
+# own answer is deliberately NOT evidence: a crewmate that goes quiet before
+# answering its own gate is exactly the wedge this ladder exists to catch, so
+# those keep the unchanged schedule, reason and demand-deep-inspection wording.
+# Nothing here weakens detection for a pane with no wait at all - their
+# escalation schedule, reason and wording are untouched. The status-line reads
+# are free; the crew-state read is the costly one (it may make a bounded
+# no-mistakes call), so it is taken last, only when no declaration explains the
+# quiet, and only in the at-threshold branch - at most once per window per
+# STALE_ESCALATE_SECS, never on an ordinary poll.
+wedge_wait_evidence() {  # <task> -> one wait_record on stdout
+  local task=$1 last until statusf
   [ -n "$task" ] || return 1
-  last=$(last_status_line "$STATE/$task.status")
+  statusf="$STATE/$task.status"
+  last=$(last_status_line "$statusf")
   if status_is_captain_held "$last"; then
-    printf 'held'
+    wait_record 'captain-held' 'awaiting the captain - verified hold transfer' \
+      captain 'answer the held decision or release the hold' "$statusf"
     return 0
   fi
-  status_is_paused "$last" || return 1
-  if until=$(status_paused_until "$last"); then
-    [ "$(date +%s)" -lt "$until" ] || return 1
+  if status_is_paused "$last"; then
+    if until=$(status_paused_until "$last"); then
+      [ "$(date +%s)" -lt "$until" ] || return 1
+    fi
+    wait_record 'declared wait' 'awaiting external' \
+      external 'confirm the wait still holds' "$statusf"
+    return 0
   fi
-  printf 'declared'
+  if crew_gate_awaits_human_decision "$task"; then
+    wait_record 'verified wait at a parked gate' "awaiting the captain's ask-user decision" \
+      captain "answer the gate's ask-user finding" ''
+    return 0
+  fi
+  return 1
 }
 
-# Defer ONE wedge escalation for a pane whose own declaration explains the quiet
+# Defer ONE wedge escalation for a pane whose wait record explains the quiet
 # (wedge_wait_evidence above). Deliberately the same shape as
 # wedge_defer_writing: a DEFERRAL, not a cancellation, so the idle timer restarts
 # and the next window probes the evidence again - a wait that ends is escalating
 # again within one STALE_ESCALATE_SECS, which is why the worst-case detection
 # time for a pane that stops waiting does not move.
-# How long the wait has held is read from the status file, which is when the
-# worker wrote the line - anchored there rather than on a per-window marker for
-# the same reason handle_paused_stale is: an idle pane churns its display (a
-# clock, a token counter), and a marker this deferral kept touching would let
-# that churn reset the cadence.
-# The recheck names WHICH human the wait is on, for the same reason
-# handle_paused_stale does: a hold is owed by the captain reading the recheck, so
-# wording it as an external dependency points them away from the one action that
-# clears it.
-# A HOLD is not rechecked at all while the away-posture record exists: the one
-# human who can answer it is away, the return brief already lists it, and every
-# other captain-held path in this file absorbs it silently for that reason
-# (handle_paused_stale, surface_nonterminal_stale, captain_call_stale_bound).
-# That absorb arms no throttle, so the recheck is owed in full the moment the
-# record is archived rather than starting a cadence nobody could act on.
+# Every word of the recheck that could be wrong per kind of evidence - the human
+# it names, the action it asks for, the age it publishes - is READ FROM THE
+# RECORD rather than re-derived here, so this function cannot word one kind of
+# wait as another.
+# A wait with a written record is aged from that file, which is when the worker
+# wrote the line - anchored there rather than on a per-window marker for the same
+# reason handle_paused_stale is: an idle pane churns its display (a clock, a
+# token counter), and a marker this deferral kept touching would let that churn
+# reset the cadence. A wait with NO written record publishes no age at all: the
+# quiet window is the only clock in hand and this deferral resets it on every
+# pass, so a number read from it would never grow and would tell a supervisor
+# that a day-old gate opened four minutes ago. The bounded re-surface still
+# fires, governed by its own throttle instead of by a wait age.
+# A CAPTAIN-facing wait is not rechecked at all while the away-posture record
+# exists: the one human who can answer it is away, the return brief already lists
+# it, and every other captain-facing path in this file absorbs it silently for
+# that reason (handle_paused_stale, surface_nonterminal_stale,
+# captain_call_stale_bound). That absorb arms no throttle, so the recheck is owed
+# in full the moment the record is archived rather than starting a cadence nobody
+# could act on.
 # The escalation counter is left alone, exactly as the write deferral leaves it:
 # this is not an escalation, and a later genuine one must keep the
 # demand-inspection history it had already earned.
-wedge_defer_wait() {  # <window> <task> <since-file> <triage-label> <idle-age> <declared|held>
-  local win=$1 task=$2 since_file=$3 label=$4 age=$5 evidence=$6 key mtime wage min_age kind action waited
-  if [ "$evidence" = held ]; then
-    if afk_record_present; then
-      triage_log "absorbed $label (captain-held, never rechecked while the away-posture record exists): $win"
-      return 0
-    fi
-    kind='captain-held, awaiting the captain - verified hold transfer'
-    action='answer the held decision or release the hold'
-  else
-    kind='declared wait, awaiting external'
-    action='confirm the wait still holds'
+wedge_defer_wait() {  # <window> <since-file> <triage-label> <idle-age> <wait-record>
+  local win=$1 since_file=$2 label=$3 age=$4 record=$5
+  local kind subject whom action anchor key mtime wage min_age waited
+  IFS=$(printf '\t') read -r kind subject whom action anchor <<EOF
+$record
+EOF
+  if [ "$whom" = captain ] && afk_record_present; then
+    triage_log "absorbed $label ($kind, never rechecked while the away-posture record exists): $win"
+    return 0
   fi
   key=$(window_key "$win")
-  mtime=$(stat_mtime "$STATE/$task.status")
+  mtime=''
+  [ -n "$anchor" ] && mtime=$(stat_mtime "$anchor")
   case "$mtime" in
     ''|*[!0-9]*)
-      # An unreadable status file ages from the quiet window already in hand.
-      # Anchoring on the current time instead would recompute the wait age as 0
-      # at every threshold, and the bounded re-surface could then never fire at
-      # all - the one outcome this deferral must not produce.
+      # No readable record of when the wait started - either none exists, or the
+      # status file could not be read. Age from the quiet window already in hand
+      # and publish nothing: anchoring on the current time instead would
+      # recompute the wait age as 0 at every threshold, and the bounded
+      # re-surface could then never fire at all - the one outcome this deferral
+      # must not produce.
       wage=$age; min_age=0; waited=''
       ;;
     *)
@@ -1011,9 +1059,9 @@ wedge_defer_wait() {  # <window> <task> <since-file> <triage-label> <idle-age> <
   clear_write_tracking "$key"
   date +%s > "$since_file"
   resurface_absorbed "$win" "$STATE/.waiting-resurfaced-$key" "$wage" \
-    "stale: $win (idle ${age}s${waited} - $kind, rechecked on a long cadence not a wedge; $action)" \
+    "stale: $win (idle ${age}s${waited} - $kind, $subject, rechecked on a long cadence not a wedge; $action)" \
     '' "$min_age"
-  triage_log "absorbed $label (the pane's own wait explains the quiet, idle ${age}s): $win"
+  triage_log "absorbed $label ($kind explains the quiet, idle ${age}s): $win"
 }
 
 # Drop a window's write-deferral chain wherever its stale bookkeeping resets, so
@@ -1027,16 +1075,17 @@ clear_write_tracking() {  # <window-key>
 # Repeat-poll wedge-timer bookkeeping for an already-classified stale hash
 # absorbed as provably-working - repairs a missing/corrupt timer (self-heals a
 # watcher restart between recording the hash and recording the timer), or
-# escalates once STALE_ESCALATE_SECS have elapsed. Never re-reads the crew
-# state (the costly check already ran once, at classification time). Shared by
-# both places a hash can be absorbed this way: the plain non-terminal path,
-# and the stale_is_terminal-overridden path (a captain-relevant status-log
-# line that an active run/busy pane outranked).
-# The wait-evidence consult (wedge_wait_evidence, one status-line read) and the
-# worktree write probe run ONLY here, inside the at-threshold branch that is
-# about to escalate: at most one each per window per STALE_ESCALATE_SECS, never
-# per poll. The wait consult runs first, because a pane whose worker already said
-# why it is quiet has nothing to prove through its worktree.
+# escalates once STALE_ESCALATE_SECS have elapsed. Shared by both places a hash
+# can be absorbed this way: the plain non-terminal path, and the
+# stale_is_terminal-overridden path (a captain-relevant status-log line that an
+# active run/busy pane outranked).
+# The wait-evidence consult (wedge_wait_evidence) and the worktree write probe
+# run ONLY here, inside the at-threshold branch that is about to escalate: at
+# most one each per window per STALE_ESCALATE_SECS, never per poll. Ordinary
+# polls still never re-read the crew state; the one re-read wedge_wait_evidence
+# may take is bounded by that same threshold. The wait consult runs first,
+# because a pane that can account for its own quiet has nothing to prove through
+# its worktree.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task>
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 since age n reason evidence
   since=$(cat "$since_file" 2>/dev/null || true)
@@ -1052,7 +1101,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
       age=$(( $(date +%s) - since ))
       if [ "$age" -ge "$STALE_ESCALATE_SECS" ]; then
         if evidence=$(wedge_wait_evidence "$task"); then
-          wedge_defer_wait "$win" "$task" "$since_file" "$label" "$age" "$evidence"
+          wedge_defer_wait "$win" "$since_file" "$label" "$age" "$evidence"
           return 0
         fi
         if crew_worktree_written_since "$task" "$STATE" "$since_file"; then
@@ -1160,7 +1209,13 @@ handle_paused_stale() {  # <window> <task> <hash>
 # the expected external wait. The caller has already confirmed liveness through
 # the busy verdict, so this exception does not suppress undeclared wedges or
 # alter the separate non-busy classification. handle_paused_stale keeps the
-# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS. Away mode
+# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS.
+# A pane that declared nothing falls through to the shared wedge timer, which
+# applies the same rule to the one wait a busy pane cannot declare: a validation
+# gate of its own awaiting a human decision also takes the bounded recheck rather
+# than the ladder, because who owes that answer does not depend on what the pane
+# is rendering, and the recheck names that human and the action that clears it.
+# Away mode
 # remains daemon-owned and receives the undecorated wake identity for its own
 # classification, which is why the declaration is read before the afk branch
 # rather than after it.

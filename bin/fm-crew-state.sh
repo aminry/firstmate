@@ -329,6 +329,57 @@ nm_gate_findings_count() {
   case "$rest" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s' "$rest"
 }
+# 0 when the gate's own findings table holds at least one row whose `action`
+# column is exactly `ask-user` - the pipeline's own record that this gate's
+# answer is owed by a HUMAN, not by the crewmate (awaiting_approval, fix_review
+# and awaiting_agent gates are all reported parked, and the crewmate answers
+# those itself).
+#
+# Read POSITIONALLY, the way nm_gate_step_row above reads its row: locate the
+# `findings[N]{...}` header, take the index of the `action` column from it, walk
+# each of the N rows that follow to that index, and compare for EQUALITY. A
+# substring search over the run payload cannot make this distinction - the
+# trailing `description` column is free text that routinely quotes finding
+# actions, and the payload also carries the branch name and step names, so a
+# gate owed the crewmate's own answer would match just as readily as one owed a
+# human. Column order is read from the header rather than assumed, so a table
+# that grows a column keeps answering correctly, and every field before `action`
+# is a short scalar, which is what makes walking commas to that index sound.
+nm_gate_awaits_human_decision() {
+  local header count cols idx i field rows row rest
+  header=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*findings\[[0-9]+\]\{[^}]*\}:' | head -1)
+  [ -n "$header" ] || return 1
+  count=$(printf '%s' "$header" | sed -n 's/^[[:space:]]*findings\[\([0-9][0-9]*\)\].*/\1/p')
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$count" -gt 0 ] || return 1
+  cols=$(printf '%s' "$header" | sed -n 's/^[^{]*{\([^}]*\)}.*/\1/p')
+  [ -n "$cols" ] || return 1
+  idx=0
+  i=0
+  while [ -n "$cols" ]; do
+    i=$((i + 1))
+    if [ "$(strip_quotes "$(trim "${cols%%,*}")")" = action ]; then idx=$i; break; fi
+    case "$cols" in *,*) cols=${cols#*,} ;; *) cols='' ;; esac
+  done
+  [ "$idx" -gt 0 ] || return 1
+  rows=$(printf '%s\n' "$RUN_OUT" \
+    | awk -v n="$count" 'f { print; if (++c >= n) exit; next } /^[[:space:]]*findings\[[0-9]+\]/ { f = 1 }')
+  while IFS= read -r row; do
+    case "$row" in *,*) ;; *) continue ;; esac
+    rest=$row
+    i=1
+    while [ "$i" -lt "$idx" ]; do
+      case "$rest" in *,*) rest=${rest#*,} ;; *) rest=''; break ;; esac
+      i=$((i + 1))
+    done
+    [ -n "$rest" ] || continue
+    field=$(strip_quotes "$(trim "${rest%%,*}")")
+    [ "$field" = ask-user ] && return 0
+  done <<EOF
+$rows
+EOF
+  return 1
+}
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
   case "$(status_line_note "$LOG_LINE")" in
@@ -682,8 +733,11 @@ if [ "$HAVE_RUN" = 1 ]; then
       RUN_DETAIL="parked at $gate"
       fcount=$(nm_gate_findings_count)
       [ -n "$fcount" ] && RUN_DETAIL="$RUN_DETAIL: $fcount finding(s)"
-      if printf '%s\n' "$RUN_OUT" | grep -q 'ask-user'; then
-        RUN_DETAIL="$RUN_DETAIL (ask-user: authority decision)"
+      # Its own ${SEP} component, not free text inside the detail: consumers
+      # compare a whole component for equality, so nothing a gate name or a
+      # later note happens to contain can mint it.
+      if nm_gate_awaits_human_decision; then
+        RUN_DETAIL="$RUN_DETAIL${SEP}$FM_GATE_HUMAN_DECISION"
       fi
     else
       case "$status" in

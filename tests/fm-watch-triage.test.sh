@@ -2641,6 +2641,124 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
   pass "a captain-held lane is rechecked as a hold on the captain, never as an external wait, and never at all while the captain is away"
 }
 
+# --- the wedge threshold reads the crew's own parked-gate state --------------
+# Upstream kunchenguid/firstmate#3055: a lane parked at a validation gate that is
+# waiting on a HUMAN is correctly quiet, but nothing in the status LINE says so -
+# the evidence is the pipeline's gate state, not anything the worker wrote. One
+# such lane reached 671 consecutive escalations on a single home. Neither landed
+# mitigation covers it: a declared `paused:` does nothing because a live ordinary
+# crewmate's absorb class never reads paused, and raising the threshold delays
+# genuine wedge detection for every lane equally.
+#
+# The distinction that makes this safe is between the two gates the crew state
+# both reports as `parked`: one owed a HUMAN, and one owed the CREWMATE's own
+# answer. Only the first may go quiet - a crewmate that wedges before answering
+# its own gate is exactly the failure this ladder exists to catch - so both
+# directions are pinned here, and the crewmate direction is written so that a
+# consumer which merely searched the verdict for the token would fail it.
+test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
+  local dir state fakebin out capture window key n queued
+  # The gate's own findings table said a human owes this answer, so
+  # bin/fm-crew-state.sh minted the human-decision component (its derivation from
+  # the `action` column by position is pinned in tests/fm-crew-state.test.sh).
+  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision'
+  # The same shape owed the crewmate itself. The gate name is free text carried
+  # out of the run payload, so this one spells the whole marker inside it: a
+  # consumer that searched the verdict for those words instead of comparing a
+  # whole component for equality would read this lane as human-owed and take its
+  # ladder away.
+  local crewmate='state: parked · source: run-step · parked at fix_review (ask-user: authority decision follow-up): 2 finding(s)'
+
+  window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
+
+  # The status line is deliberately a stale, unrelated `working:` note backdated
+  # well past the recheck cadence - the sparse status contract's ordinary shape
+  # for a lane whose run parked long after its last append. It is not the record
+  # of this wait, so nothing about the recheck may be computed from it.
+  dir=$(wedge_threshold_fixture parked-gate-human 'working: validation under way' 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "a gate awaiting a human was never rechecked at the threshold: $(cat "$out")"
+  grep -F 'verified wait at a parked gate' "$out" >/dev/null \
+    || fail "the parked-gate recheck did not name its evidence: $(cat "$out")"
+  grep -F "awaiting the captain's ask-user decision" "$out" >/dev/null \
+    || fail "the parked-gate recheck did not name the human the wait is on: $(cat "$out")"
+  grep -F "answer the gate's ask-user finding" "$out" >/dev/null \
+    || fail "the parked-gate recheck did not name the action that clears the lane: $(cat "$out")"
+  grep -F 'confirm the wait still holds' "$out" >/dev/null \
+    && fail "a parked gate borrowed the external-wait action, which does not clear it: $(cat "$out")"
+  grep -F 'possible wedge' "$out" >/dev/null \
+    && fail "a gate awaiting a human was reported as a possible wedge: $(cat "$out")"
+  # No wait age is published, because no record of when this wait began exists:
+  # the status file is an unrelated line, and the idle window this deferral
+  # resets every pass would report the same small number forever.
+  grep -E ', waiting [0-9]+s' "$out" >/dev/null \
+    && fail "the parked-gate recheck published a wait age it has no record for: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the parked-gate recheck"
+
+  # Long cadence, not a ladder: every further threshold inside the cadence is
+  # absorbed whole, with no escalation counted and nothing queued.
+  queued=$(wedge_stale_wakes "$state" "$window")
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" absorb \
+      || fail "a gate awaiting a human wedge-escalated at threshold $n: $(cat "$out")"
+    n=$((n + 1))
+  done
+  [ "$(wedge_stale_wakes "$state" "$window")" -eq "$queued" ] \
+    || fail "a gate awaiting a human queued a further wake inside its recheck cadence: $(cat "$state/.wake-queue")"
+  [ ! -e "$state/.wedge-escalations-$key" ] \
+    || fail "a gate awaiting a human counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
+
+  # The other direction, and the whole reason the distinction is drawn: a gate
+  # the crewmate itself must answer keeps the unchanged schedule, reason and
+  # demand-deep-inspection wording.
+  dir=$(wedge_threshold_fixture parked-gate-crewmate 'working: validation under way' 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$crewmate" exit \
+      || fail "a gate awaiting the crewmate stopped escalating at threshold $n: $(cat "$out")"
+    ack_stopped_cycle "$state" || fail "could not acknowledge crewmate-gate escalation $n"
+    grep -F "possible wedge, escalation $n" "$out" >/dev/null \
+      || fail "a gate awaiting the crewmate did not reach escalation $n: $(cat "$out")"
+    n=$((n + 1))
+  done
+  grep -F 'demand-deep-inspection: same pane has wedge-escalated 3 times in a row' "$out" >/dev/null \
+    || fail "a gate awaiting the crewmate lost the demand-deep-inspection wording: $(cat "$out")"
+  grep -F 'verified wait at a parked gate' "$out" >/dev/null \
+    && fail "a gate awaiting the crewmate was deferred as a wait on a human: $(cat "$out")"
+
+  # The wait is on a human who may be away, so this recheck obeys the
+  # away-posture record exactly as every other captain-facing path here does:
+  # absorbed in silence, and with no throttle armed, so the recheck is owed in
+  # full the moment the record is archived rather than starting a cadence nobody
+  # could act on.
+  dir=$(wedge_threshold_fixture parked-gate-away 'working: validation under way' 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  write_away_record "$state"
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" absorb \
+      || fail "a parked gate was rechecked at threshold $n while the away-posture record existed: $(cat "$out")"
+    n=$((n + 1))
+  done
+  [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
+    || fail "a parked gate woke the away captain: $(cat "$state/.wake-queue")"
+  [ ! -e "$state/.waiting-resurfaced-$key" ] \
+    || fail "an away-silenced parked gate armed the recheck throttle, so the recheck owed on return would be delayed a full cadence"
+  [ ! -e "$state/.wedge-escalations-$key" ] \
+    || fail "an away-silenced parked gate counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
+  archive_away_record "$state"
+  : > "$out"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "a parked gate was never rechecked after the away-posture record was archived: $(cat "$out")"
+  grep -F "answer the gate's ask-user finding" "$out" >/dev/null \
+    || fail "the recheck owed on return did not name the action that clears the gate: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the on-return parked-gate recheck"
+  pass "a gate awaiting a human is rechecked on the long cadence naming that human and the action that clears it, while a gate awaiting the crewmate keeps the unchanged ladder"
+}
+
 
 # --- work the captain is already holding: pane churn must not re-alarm -------
 # The other record of a legitimate wait. The declared-wait bound above reads the
@@ -5137,6 +5255,7 @@ test_live_declared_wait_churn_honors_the_resurface_throttle
 test_live_paused_until_controls_recheck_time
 test_wedge_threshold_defers_to_a_declared_wait_under_a_working_verdict
 test_wedge_threshold_recheck_names_the_captain_for_a_held_lane
+test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human
 test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms
 test_failed_wake_append_does_not_arm_the_captain_hold_throttle

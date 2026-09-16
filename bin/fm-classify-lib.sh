@@ -1834,6 +1834,46 @@ crew_is_paused() {  # <id>
   [ "$(crew_absorb_class "$1")" = paused ]
 }
 
+# The one spelling of the verdict component that says a parked gate's answer is
+# owed by a HUMAN. bin/fm-crew-state.sh mints it (nm_gate_awaits_human_decision
+# owns the derivation: the findings table's `action` column, read by position);
+# crew_gate_awaits_human_decision below is its only consumer.
+FM_GATE_HUMAN_DECISION='ask-user: authority decision'
+
+# 0 if crew <id>'s authoritative current state is a no-mistakes gate whose answer
+# is owed by a human rather than by the crewmate itself.
+#
+# `parked` alone cannot answer this: bin/fm-crew-state.sh reports it for every
+# gate shape, and awaiting_approval, fix_review and awaiting_agent gates are all
+# answered by the crewmate whose run they belong to. A crewmate that goes quiet
+# before answering its OWN gate is precisely the wedge the escalation ladder
+# exists to catch, so only the minted component above - never the parked verdict,
+# the gate name, or the finding text - admits a lane here.
+#
+# The whole component is compared for equality rather than searched for, so a
+# gate name or a reconciliation note that happens to contain the words cannot
+# mint it downstream either.
+# Same cost and the same caveat as crew_absorb_class: one fm-crew-state.sh read,
+# which may make a bounded no-mistakes call, so callers take it only where they
+# already accept that cost.
+crew_gate_awaits_human_decision() {  # <id>
+  local id=$1 line state src rest part
+  [ -n "$id" ] || return 1
+  line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null) || true
+  case "$line" in state:*) ;; *) return 1 ;; esac
+  state=${line#state: }; state=${state%% *}
+  [ "$state" = parked ] || return 1
+  src=${line#*source: }; src=${src%% *}
+  [ "$src" = run-step ] || return 1
+  rest="$line · "
+  while [ -n "$rest" ]; do
+    part=${rest%% · *}
+    rest=${rest#* · }
+    [ "$part" = "$FM_GATE_HUMAN_DECISION" ] && return 0
+  done
+  return 1
+}
+
 # Directories excluded from the worktree write probe below, and the depth it walks.
 # The excluded set is everything a supervisor read or a package manager can write
 # without the crew doing any work - .git first, so firstmate's own read-only git
