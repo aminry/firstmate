@@ -2441,18 +2441,24 @@ wedge_threshold_round() {  # <state> <fakebin> <out> <capture> <window> <verdict
   return 0
 }
 
-# A lane already stably stale at its recorded hash, with a non-captain-relevant
-# last line - exactly where wedge_timer_check owns the pane. <status-age> backdates
-# the status file so a case can put the bounded recheck cadence in or out of reach.
-wedge_threshold_fixture() {  # <name> <status-line> <status-age-secs>
-  local name=$1 line=$2 age=$3 dir state statusf window key text back
+# A lane already stably stale at its recorded hash - exactly where
+# wedge_timer_check owns the pane. <status-log> is the WHOLE log, so a case can
+# supply the multi-line history a decision fold actually reads; <status-age>
+# backdates the file so a case can put the bounded recheck cadence in or out of
+# reach. <wedge-timer-age>, when given, pre-arms this key's wedge timer at that
+# age: a log whose last line is captain-relevant (a `needs-decision:` escalation
+# is) routes through the overridden-terminal-status branch, which reaches
+# wedge_timer_check only for a hash whose timer is already running, so a case on
+# that path must arm it rather than assume the plain non-terminal route.
+wedge_threshold_fixture() {  # <name> <status-log> <status-age-secs> [<wedge-timer-age-secs>]
+  local name=$1 log=$2 age=$3 timer=${4-} dir state statusf window key text back
   dir=$(make_case "$name"); state="$dir/state"
   window="test:fm-wedge"
   statusf="$state/wedge.status"
   text='waiting at the gate'
   printf '%s' "$text" > "$dir/pane.txt"
   printf 'window=%s\nkind=ship\nharness=grok\nbackend=tmux\n' "$window" > "$state/wedge.meta"
-  printf '%s\n' "$line" > "$statusf"
+  printf '%s\n' "$log" > "$statusf"
   back=$(( $(date +%s) - age ))
   set_mtime "$back" "$statusf"
   printf '%s' "$(seen_sig "$statusf")" > "$state/.seen-wedge_status"
@@ -2463,6 +2469,9 @@ wedge_threshold_fixture() {  # <name> <status-line> <status-age-secs>
   # first sight: the suppressor holds this exact hash, so every further poll goes
   # straight to the wedge timer.
   printf '%s' "$(hash_text "$text")" > "$state/.stale-$key"
+  if [ -n "$timer" ]; then
+    printf '%s\n' "$(( $(date +%s) - timer ))" > "$state/.stale-since-$key"
+  fi
   printf '%s\n' "$dir"
 }
 
@@ -2656,6 +2665,8 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
 # its own gate is exactly the failure this ladder exists to catch - so both
 # directions are pinned here, and the crewmate direction is written so that a
 # consumer which merely searched the verdict for the token would fail it.
+# The second half of that evidence - that the human was actually asked and has
+# not answered - is pinned in the test below this one.
 test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
   local dir state fakebin out capture window key n queued
   # The gate's own findings table said a human owes this answer, so
@@ -2671,11 +2682,20 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
 
   window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
 
-  # The status line is deliberately a stale, unrelated `working:` note backdated
-  # well past the recheck cadence - the sparse status contract's ordinary shape
-  # for a lane whose run parked long after its last append. It is not the record
-  # of this wait, so nothing about the recheck may be computed from it.
-  dir=$(wedge_threshold_fixture parked-gate-human 'working: validation under way' 2000)
+  # The log every case here shares: the crew escalated the gate's question and
+  # nobody has answered it yet, so its decision fold still holds one open
+  # `needs-decision`. That is the record of who was TOLD; the crew-state verdict
+  # above is the record of who OWES the answer, and the deferral needs both.
+  # The trailing `working:` note is what a crew appends next and does not close a
+  # decision, so it leaves the fold open while keeping the LAST line
+  # non-captain-relevant - the plain route into the wedge timer these cases want.
+  # The file is backdated well past the recheck cadence, and it is still not the
+  # record of when this wait began, so nothing about the recheck may be computed
+  # from its mtime.
+  local escalated='needs-decision: the gate raised an authority question [key=gate-1]
+working: still parked at that gate'
+
+  dir=$(wedge_threshold_fixture parked-gate-human "$escalated" 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
     || fail "a gate awaiting a human was never rechecked at the threshold: $(cat "$out")"
@@ -2713,7 +2733,7 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
   # The other direction, and the whole reason the distinction is drawn: a gate
   # the crewmate itself must answer keeps the unchanged schedule, reason and
   # demand-deep-inspection wording.
-  dir=$(wedge_threshold_fixture parked-gate-crewmate 'working: validation under way' 2000)
+  dir=$(wedge_threshold_fixture parked-gate-crewmate "$escalated" 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   n=1
   while [ "$n" -le 3 ]; do
@@ -2734,7 +2754,7 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
   # absorbed in silence, and with no throttle armed, so the recheck is owed in
   # full the moment the record is archived rather than starting a cadence nobody
   # could act on.
-  dir=$(wedge_threshold_fixture parked-gate-away 'working: validation under way' 2000)
+  dir=$(wedge_threshold_fixture parked-gate-away "$escalated" 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   write_away_record "$state"
   n=1
@@ -2757,6 +2777,117 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
     || fail "the recheck owed on return did not name the action that clears the gate: $(cat "$out")"
   ack_stopped_cycle "$state" || fail "could not acknowledge the on-return parked-gate recheck"
   pass "a gate awaiting a human is rechecked on the long cadence naming that human and the action that clears it, while a gate awaiting the crewmate keeps the unchanged ladder"
+}
+
+# --- a parked human-owed gate also needs the human to still owe an answer ----
+# The gate's findings table says who the answer is owed BY. It does not say the
+# human was ever asked, and it does not stop saying `ask-user` once they answer:
+# the run stays parked, and the row stays in the table, until the CREWMATE relays
+# the decision with `axi respond`. So a lane that is quiet because the crewmate
+# wedged before relaying an answer it already has would read exactly like a lane
+# waiting on the captain - and would lose the ladder for the one failure the
+# ladder exists to catch.
+# The task's own decision fold is the record that closes that hole, because it is
+# written at ANSWER time rather than at relay time: `fm-send --resolve-key`
+# appends the closing `resolved` line the moment the captain answers. An open
+# `needs-decision` therefore means the human was told and has not answered; its
+# absence means the outstanding move belongs to the crewmate, or that nobody was
+# ever told at all. Each of those keeps the unchanged schedule below.
+test_wedge_threshold_parked_gate_needs_an_unanswered_decision() {
+  local dir state fakebin out capture window key n
+  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision'
+  window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
+
+  # Answered, not yet relayed. The gate verdict is byte-identical to the one the
+  # test above defers on; only the closing `resolved` line differs, and the
+  # `resolved:` verb is not captain-relevant, so this lane takes the same plain
+  # non-terminal route into the wedge timer as that one.
+  dir=$(wedge_threshold_fixture parked-gate-decided \
+    'needs-decision: the gate raised an authority question [key=gate-1]
+resolved: the captain chose the second fix [key=gate-1]' 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+      || fail "a decided-but-unrelayed gate stopped escalating at threshold $n: $(cat "$out")"
+    ack_stopped_cycle "$state" || fail "could not acknowledge decided-gate escalation $n"
+    grep -F "possible wedge, escalation $n" "$out" >/dev/null \
+      || fail "a decided-but-unrelayed gate did not reach escalation $n: $(cat "$out")"
+    n=$((n + 1))
+  done
+  grep -F 'demand-deep-inspection: same pane has wedge-escalated 3 times in a row' "$out" >/dev/null \
+    || fail "a decided-but-unrelayed gate lost the demand-deep-inspection wording: $(cat "$out")"
+  grep -F 'verified wait at a parked gate' "$out" >/dev/null \
+    && fail "a gate whose decision was already answered was deferred as a wait on the captain: $(cat "$out")"
+
+  # Parked at a human-owed gate, quiet, and the crewmate never escalated it: no
+  # human has been told, so there is no wait to defer to.
+  dir=$(wedge_threshold_fixture parked-gate-unescalated 'working: validation under way' 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "a human-owed gate nobody was told about never escalated: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the unescalated-gate escalation"
+  grep -F 'possible wedge, escalation 1' "$out" >/dev/null \
+    || fail "a human-owed gate nobody was told about did not take the unchanged ladder: $(cat "$out")"
+
+  # An open `blocked` record is not an unanswered question: it is an obstacle the
+  # crew reported, and a different action clears it. A `blocked:` last line is
+  # captain-relevant, so this lane reaches the wedge timer through the
+  # overridden-terminal-status branch instead, which only ever sees a hash whose
+  # timer is already running - hence the fixture's fourth argument.
+  dir=$(wedge_threshold_fixture parked-gate-blocked \
+    'blocked: the fixture cannot reach its dependency [key=gate-1]' 2000 600)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "a human-owed gate with only a blocker open never escalated: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the blocked-gate escalation"
+  grep -F 'possible wedge, escalation 1' "$out" >/dev/null \
+    || fail "an open blocker was accepted as an unanswered gate decision: $(cat "$out")"
+  pass "a parked human-owed gate is deferred only while its decision is still open, so an answered-but-unrelayed gate, an unescalated one, and one holding only a blocker all keep the unchanged ladder"
+}
+
+# --- a wait record that does not carry every field is refused ----------------
+# wait_record joins its fields with TABs and wedge_defer_wait parses them with
+# `IFS=<tab> read`. TAB is an IFS WHITESPACE character, so consecutive tabs
+# collapse: a record with an empty middle field does not fail to parse, it SHIFTS
+# - an empty subject puts `whom` where the subject is read and the prose action
+# where `whom` is read, so the away-posture test inspects a sentence and the
+# recheck prints an action that clears nothing. Deferring is what takes the
+# ladder away, so an unparseable record must fall back to the escalation the
+# caller was about to make instead.
+# No shipped evidence producer can emit a half-filled record, which is precisely
+# the invariant under test, so this loads the real bin/fm-watch.sh through its
+# own source guard in a child shell (the entry tests/fm-supervision-events.test.sh
+# uses) and drives the real wedge_timer_check. The assertion is on the durable
+# wake queue the watcher actually wrote.
+test_wedge_defer_refuses_a_half_filled_wait_record() {
+  local dir state out
+  dir=$(make_case malformed-wait-record); state="$dir/state"
+  printf 'working: validation under way\n' > "$state/wedge.status"
+  printf '%s\n' "$(( $(date +%s) - 600 ))" > "$state/.stale-since-test_fm-wedge"
+
+  out="$dir/defer.out"
+  FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=1 FM_PAUSE_RESURFACE_SECS=999 \
+    FM_WEDGE_DEMAND_INSPECT_COUNT=3 \
+    bash -c '
+      # shellcheck disable=SC1090,SC1091
+      . "$1"
+      wake() { :; }
+      wedge_wait_evidence() {
+        wait_record "declared wait" "" external "confirm the wait still holds" ""
+      }
+      wedge_timer_check "test:fm-wedge" "$FM_STATE_OVERRIDE/.stale-since-test_fm-wedge" \
+        "non-terminal stale" "$FM_STATE_OVERRIDE/.wedge-escalations-test_fm-wedge" wedge
+    ' _ "$WATCH" > "$out" 2>&1 \
+    || fail "the wedge timer failed on a malformed wait record: $(cat "$out")"
+
+  grep -F 'possible wedge, escalation 1' "$state/.wake-queue" >/dev/null \
+    || fail "a malformed wait record did not keep the unchanged ladder: $(cat "$state/.wake-queue" 2>/dev/null)"
+  grep -F 'rechecked on a long cadence not a wedge' "$state/.wake-queue" >/dev/null \
+    && fail "a malformed wait record was deferred on shifted fields: $(cat "$state/.wake-queue")"
+  [ "$(cat "$state/.wedge-escalations-test_fm-wedge" 2>/dev/null || echo 0)" -eq 1 ] \
+    || fail "a malformed wait record did not count its escalation"
+  pass "a wait record missing a field the recheck must print is refused, and the lane escalates exactly as it would have"
 }
 
 
@@ -5256,6 +5387,8 @@ test_live_paused_until_controls_recheck_time
 test_wedge_threshold_defers_to_a_declared_wait_under_a_working_verdict
 test_wedge_threshold_recheck_names_the_captain_for_a_held_lane
 test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human
+test_wedge_threshold_parked_gate_needs_an_unanswered_decision
+test_wedge_defer_refuses_a_half_filled_wait_record
 test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms
 test_failed_wake_append_does_not_arm_the_captain_hold_throttle

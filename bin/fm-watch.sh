@@ -43,8 +43,9 @@
 #                          that can account for its quiet - a `paused:` external
 #                          wait or a verified `captain-held` transfer its worker
 #                          declared, or a validation gate of its own awaiting a
-#                          human decision - is deferred to that same long recheck
-#                          cadence instead (wedge_wait_evidence), and a pane whose own task
+#                          human decision nobody has answered yet - is deferred to
+#                          that same long recheck cadence instead
+#                          (wedge_wait_evidence), and a pane whose own task
 #                          worktree was written during the quiet window is
 #                          deferred rather than escalated (wedge_defer_writing),
 #                          because files appearing there are liveness the pane and
@@ -959,19 +960,35 @@ wait_record() {  # <kind> <subject> <whom> <action> <age-record>
 # timer only through pause_state_class answering `working`, so its crew state is
 # a running step, never a parked gate.
 #
-# The second record is the crew's authoritative current state, consulted when the
-# status line accounts for nothing: a no-mistakes gate whose answer is owed by a
-# HUMAN (crew_gate_awaits_human_decision in fm-classify-lib.sh, minted from the
-# findings table's `action` column by position). A gate awaiting the CREWMATE's
-# own answer is deliberately NOT evidence: a crewmate that goes quiet before
-# answering its own gate is exactly the wedge this ladder exists to catch, so
-# those keep the unchanged schedule, reason and demand-deep-inspection wording.
+# The second record takes TWO signals, and needs both. The crew's authoritative
+# current state must be a no-mistakes gate whose answer is owed by a HUMAN
+# (crew_gate_awaits_human_decision in fm-classify-lib.sh, minted from the
+# findings table's `action` column by position), AND the task's own decision fold
+# must still hold an open `needs-decision` record. The gate's table alone says
+# only who the answer is owed BY; the open decision is the positive evidence that
+# the human was actually told and has not answered yet, which is what makes the
+# lane's quiet a wait rather than a suspected wedge. The two come apart in both
+# directions, and the ladder is kept in each:
+#   - the captain ANSWERED and the crewmate has not yet relayed it with
+#     `axi respond`: the gate is still reported parked and still carries the
+#     ask-user row, but `fm-send --resolve-key` wrote the closing `resolved` line
+#     at answer time, so the fold is empty and what is outstanding is the
+#     crewmate's OWN next move;
+#   - the crewmate parked at a human-owed gate and went quiet before escalating
+#     it at all: nobody was ever told, so there is no wait to defer to.
+# A `blocked` record does not count: a blocker is not an unanswered gate decision
+# and a different action clears it. A gate awaiting the CREWMATE's own answer is
+# deliberately NOT evidence either: a crewmate that goes quiet before answering
+# its own gate is exactly the wedge this ladder exists to catch, so those keep
+# the unchanged schedule, reason and demand-deep-inspection wording.
 # Nothing here weakens detection for a pane with no wait at all - their
-# escalation schedule, reason and wording are untouched. The status-line reads
-# are free; the crew-state read is the costly one (it may make a bounded
-# no-mistakes call), so it is taken last, only when no declaration explains the
-# quiet, and only in the at-threshold branch - at most once per window per
-# STALE_ESCALATE_SECS, never on an ordinary poll.
+# escalation schedule, reason and wording are untouched, and every way this
+# signal can come back empty (an unreadable status file, a fold with nothing
+# open, a key convention nobody followed) escalates on the unchanged schedule
+# rather than losing the ladder. The status-line and fold reads are file reads;
+# the crew-state read is the costly one (it may make a bounded no-mistakes call),
+# so it is taken last, behind the fold, and only in the at-threshold branch - at
+# most once per window per STALE_ESCALATE_SECS, never on an ordinary poll.
 wedge_wait_evidence() {  # <task> -> one wait_record on stdout
   local task=$1 last until statusf
   [ -n "$task" ] || return 1
@@ -990,7 +1007,7 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
       external 'confirm the wait still holds' "$statusf"
     return 0
   fi
-  if crew_gate_awaits_human_decision "$task"; then
+  if status_has_open_needs_decision "$statusf" && crew_gate_awaits_human_decision "$task"; then
     wait_record 'verified wait at a parked gate' "awaiting the captain's ask-user decision" \
       captain "answer the gate's ask-user finding" ''
     return 0
@@ -1033,6 +1050,22 @@ wedge_defer_wait() {  # <window> <since-file> <triage-label> <idle-age> <wait-re
   IFS=$(printf '\t') read -r kind subject whom action anchor <<EOF
 $record
 EOF
+  # Enforce here what the record's own contract claims, because `read` cannot:
+  # TAB is an IFS whitespace character, so a record with an empty middle field
+  # collapses rather than failing and every later field shifts left - an empty
+  # subject would put the prose action where `whom` is read and print an action
+  # that does not clear the lane. Only `anchor` may legitimately be empty. A
+  # record that fails this is refused rather than deferred on shifted fields:
+  # deferring is what takes the ladder away, so the unparseable case must fall
+  # back to the escalation the caller was about to make.
+  case "$whom" in
+    captain|external) ;;
+    *) triage_log "refused a malformed wait record for $label: $win"; return 1 ;;
+  esac
+  if [ -z "$kind" ] || [ -z "$subject" ] || [ -z "$action" ]; then
+    triage_log "refused a malformed wait record for $label: $win"
+    return 1
+  fi
   if [ "$whom" = captain ] && afk_record_present; then
     triage_log "absorbed $label ($kind, never rechecked while the away-posture record exists): $win"
     return 0
@@ -1062,6 +1095,7 @@ EOF
     "stale: $win (idle ${age}s${waited} - $kind, $subject, rechecked on a long cadence not a wedge; $action)" \
     '' "$min_age"
   triage_log "absorbed $label ($kind explains the quiet, idle ${age}s): $win"
+  return 0
 }
 
 # Drop a window's write-deferral chain wherever its stale bookkeeping resets, so
@@ -1100,8 +1134,8 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
     *)
       age=$(( $(date +%s) - since ))
       if [ "$age" -ge "$STALE_ESCALATE_SECS" ]; then
-        if evidence=$(wedge_wait_evidence "$task"); then
-          wedge_defer_wait "$win" "$since_file" "$label" "$age" "$evidence"
+        if evidence=$(wedge_wait_evidence "$task") &&
+           wedge_defer_wait "$win" "$since_file" "$label" "$age" "$evidence"; then
           return 0
         fi
         if crew_worktree_written_since "$task" "$STATE" "$since_file"; then
@@ -1212,13 +1246,13 @@ handle_paused_stale() {  # <window> <task> <hash>
 # exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS.
 # A pane that declared nothing falls through to the shared wedge timer, which
 # applies the same rule to the one wait a busy pane cannot declare: a validation
-# gate of its own awaiting a human decision also takes the bounded recheck rather
-# than the ladder, because who owes that answer does not depend on what the pane
-# is rendering, and the recheck names that human and the action that clears it.
-# Away mode
-# remains daemon-owned and receives the undecorated wake identity for its own
-# classification, which is why the declaration is read before the afk branch
-# rather than after it.
+# gate of its own awaiting a human decision that is still open also takes the
+# bounded recheck rather than the ladder, because who owes that answer does not
+# depend on what the pane is rendering, and the recheck names that human and the
+# action that clears it.
+# Away mode remains daemon-owned and receives the undecorated wake identity for
+# its own classification, which is why the declaration is read before the afk
+# branch rather than after it.
 busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file>
   local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared
   statusf="$STATE/$task.status"

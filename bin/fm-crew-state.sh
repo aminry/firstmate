@@ -331,9 +331,10 @@ nm_gate_findings_count() {
 }
 # 0 when the gate's own findings table holds at least one row whose `action`
 # column is exactly `ask-user` - the pipeline's own record that this gate's
-# answer is owed by a HUMAN, not by the crewmate (awaiting_approval, fix_review
-# and awaiting_agent gates are all reported parked, and the crewmate answers
-# those itself).
+# answer is owed by a HUMAN, not by the crewmate (the gate's shape -
+# awaiting_approval, fix_review, awaiting_agent - is reported parked in every
+# case and does not by itself say who owes the answer; only a findings row whose
+# `action` column is exactly `ask-user` does).
 #
 # Read POSITIONALLY, the way nm_gate_step_row above reads its row: locate the
 # `findings[N]{...}` header, take the index of the `action` column from it, walk

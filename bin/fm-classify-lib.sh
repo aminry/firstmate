@@ -518,6 +518,27 @@ status_open_decisions() {  # <status-file>
   printf '%s' "$open"
 }
 
+# 0 when the fold above still holds at least one decision OPENED by
+# `needs-decision` - the status side's own record that a human was asked
+# something and has not answered. A `blocked` record is deliberately not this: a
+# blocker is an obstacle the crew reported, not an unanswered question, and a
+# different action clears it. Whole-file and cursor-free on purpose: this answers
+# a point-in-time question for a caller that holds no cursor and must not write
+# one, so it reads status_open_decisions rather than the incremental fold.
+# An unreadable, missing or symlinked status file folds to nothing and answers 1,
+# which is the safe answer for every caller: no evidence, no exception.
+status_has_open_needs_decision() {  # <status-file>
+  local open line
+  open=$(status_open_decisions "$1")
+  [ -n "$open" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in *$'\t'needs-decision$'\t'*) return 0 ;; esac
+  done <<EOF
+$open
+EOF
+  return 1
+}
+
 # 0 when <key> has a record in a folded "<key>\t<verb>\t<note>" open set.
 _fm_open_set_has() {  # <open-set> <key>
   case "$1" in
@@ -1843,12 +1864,13 @@ FM_GATE_HUMAN_DECISION='ask-user: authority decision'
 # 0 if crew <id>'s authoritative current state is a no-mistakes gate whose answer
 # is owed by a human rather than by the crewmate itself.
 #
-# `parked` alone cannot answer this: bin/fm-crew-state.sh reports it for every
-# gate shape, and awaiting_approval, fix_review and awaiting_agent gates are all
-# answered by the crewmate whose run they belong to. A crewmate that goes quiet
-# before answering its OWN gate is precisely the wedge the escalation ladder
-# exists to catch, so only the minted component above - never the parked verdict,
-# the gate name, or the finding text - admits a lane here.
+# `parked` alone cannot answer this: the gate's shape (awaiting_approval,
+# fix_review, awaiting_agent) is reported parked in every case and does not by
+# itself say who owes the answer; only a findings row whose `action` column is
+# exactly `ask-user` does. A crewmate that goes quiet before answering its OWN
+# gate is precisely the wedge the escalation ladder exists to catch, so only the
+# minted component above - never the parked verdict, the gate name, or the
+# finding text - admits a lane here.
 #
 # The whole component is compared for equality rather than searched for, so a
 # gate name or a reconciliation note that happens to contain the words cannot
