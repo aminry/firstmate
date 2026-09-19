@@ -2595,6 +2595,7 @@ test_live_paused_until_controls_recheck_time() {
 wedge_threshold_round() {  # <state> <fakebin> <out> <capture> <window> <verdict> <exit|absorb>
   local state=$1 fakebin=$2 out=$3 capture=$4 window=$5 verdict=$6 mode=$7 pid cycles=0
   PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture" \
+    FM_CONFIG_OVERRIDE="$(dirname "$state")/config" \
     FM_FAKE_TMUX_CURRENT_COMMAND="${FM_TEST_PANE_COMMAND-grok}" \
     FM_FAKE_TMUX_WINDOWS="${FM_TEST_TMUX_WINDOWS-}" FM_FAKE_CREW_STATE="$verdict" \
     FM_WATCH_HANDLING_SUCCESSOR=1 \
@@ -2646,7 +2647,15 @@ wedge_threshold_fixture() {  # <name> <status-log> <status-age-secs> [<wedge-tim
   if [ -n "$timer" ]; then
     printf '%s\n' "$(( $(date +%s) - timer ))" > "$state/.stale-since-$key"
   fi
+  # An UNCONFIGURED home: the config dir exists and is empty, so every case here
+  # starts with the parked-gate wait evidence off and has to arm it deliberately.
+  mkdir -p "$dir/config"
   printf '%s\n' "$dir"
+}
+
+# Arm the opt-in parked-gate wait evidence for a fixture built above.
+arm_parked_gate() {  # <case-dir>
+  : > "$1/config/wedge-defer-parked-gate"
 }
 
 wedge_stale_wakes() {  # <state> <window>
@@ -2796,11 +2805,6 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
     'captain-held: which retention window wins' 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   write_away_record "$state"
-  # Backdated far past the escalation threshold, so the absorb below is reached
-  # with a timer whose restart is visible: the evidence consult that reaches this
-  # branch is the costly read of the pair, and an absorb that left the timer
-  # alone would repeat it on every poll for the whole away window.
-  printf '%s\n' "$(( $(date +%s) - 2000 ))" > "$state/.stale-since-$key"
   n=1
   while [ "$n" -le 3 ]; do
     FM_TEST_PAUSE_RESURFACE=240 wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$working" absorb \
@@ -2817,17 +2821,11 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
     || fail "an away-silenced hold counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
   grep -F 'never rechecked while the away-posture record exists' "$state/.watch-triage.log" >/dev/null \
     || fail "the away-silenced hold was not recorded in the triage log: $(cat "$state/.watch-triage.log")"
-  [ "$(( $(date +%s) - $(cat "$state/.stale-since-$key") ))" -lt 120 ] \
-    || fail "an away-silenced absorb left the idle timer at $(cat "$state/.stale-since-$key"), so the evidence consult would be re-taken on every poll for the whole away window"
 
-  # And the recheck returns once the captain is back, so the hold is not lost.
-  # The away-silenced absorb restarts the idle timer like every other deferral
-  # here, so the on-return leg would otherwise race the threshold: backdate the
-  # timer past it rather than leave the leg to depend on how long the rounds
-  # above happened to take. What is under test is that the recheck is owed at
-  # all once the record is archived, not how many seconds it waits for it.
+  # And the recheck is owed in full the moment the captain is back: the absorb
+  # above leaves the idle timer alone, so no part of the away window is spent
+  # against the cadence the hold is rechecked on.
   archive_away_record "$state"
-  printf '%s\n' "$(( $(date +%s) - 2000 ))" > "$state/.stale-since-$key"
   : > "$out"
   FM_TEST_PAUSE_RESURFACE=240 wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$working" exit \
     || fail "a captain-held lane was never rechecked after the away-posture record was archived: $(cat "$out")"
@@ -2890,6 +2888,7 @@ working: still parked at that gate'
 working: still parked at that gate'
 
   dir=$(wedge_threshold_fixture parked-gate-human "$escalated" 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
     || fail "a gate awaiting a human was never rechecked at the threshold: $(cat "$out")"
@@ -2930,6 +2929,7 @@ working: still parked at that gate'
   # the crewmate itself must answer keeps the unchanged schedule, reason and
   # demand-deep-inspection wording.
   dir=$(wedge_threshold_fixture parked-gate-crewmate "$escalated" 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   n=1
   while [ "$n" -le 3 ]; do
@@ -2949,6 +2949,7 @@ working: still parked at that gate'
   # does not apply: under away posture the supervision branch is the actor
   # allowed to answer it, and it keeps the long recheck cadence throughout.
   dir=$(wedge_threshold_fixture parked-gate-away "$escalated" 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   write_away_record "$state"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
@@ -2975,6 +2976,7 @@ working: still parked at that gate'
   # An open decision under an unrelated key does not bind to this gate, so the
   # lane keeps the unchanged ladder: nothing says anyone was told about it.
   dir=$(wedge_threshold_fixture parked-gate-unrelated-key "$unrelated" 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   n=1
   while [ "$n" -le 3 ]; do
@@ -2993,6 +2995,7 @@ working: still parked at that gate'
   # A verdict naming no run cannot be bound to any decision, so it keeps the
   # ladder even with the run-shaped key open.
   dir=$(wedge_threshold_fixture parked-gate-runless "$escalated" 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$runless" exit \
     || fail "a runless human-owed gate never escalated: $(cat "$out")"
@@ -3000,6 +3003,70 @@ working: still parked at that gate'
   grep -F 'possible wedge, escalation 1' "$out" >/dev/null \
     || fail "a runless human-owed gate did not take the unchanged ladder: $(cat "$out")"
   pass "a gate awaiting firstmate's decision for its own run is rechecked on the long cadence in either posture, while a crewmate-owed gate, an unrelated open decision and a runless verdict keep the unchanged ladder"
+}
+
+# --- an unconfigured home behaves exactly as it did before this evidence -----
+# The parked-gate record is the one wait here that is not the worker's own
+# declaration about its own silence: it is derived from a pipeline's gate state,
+# so a home decides for itself whether a lane may give up the escalation ladder
+# for it. Absent `config/wedge-defer-parked-gate` the lane this whole file
+# otherwise defers - human-owed gate, open decision keyed to that run, every
+# signal the armed cases assert on - must escalate on the unchanged schedule
+# with the unchanged reason and demand-deep-inspection wording, and the evidence
+# arm must not even be reached: no current-state read is spent and no recheck
+# throttle is written. The fixture is byte-identical to the armed case above
+# except for the flag, so the difference is attributable to the flag alone.
+test_wedge_threshold_parked_gate_is_off_until_armed() {
+  local dir state fakebin out capture window key n unarmed_probes armed_probes
+  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision · run: 01RUNGATE'
+  local escalated='needs-decision [key=nm-01RUNGATE-review]: the gate raised an authority question
+working: still parked at that gate'
+  window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
+
+  dir=$(wedge_threshold_fixture parked-gate-unarmed "$escalated" 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  [ ! -e "$dir/config/wedge-defer-parked-gate" ] \
+    || fail "the unarmed fixture armed the flag, so it proves nothing"
+  export FM_FAKE_CREW_STATE_LOG="$dir/crew-state.calls"
+  : > "$FM_FAKE_CREW_STATE_LOG"
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+      || fail "an unarmed home stopped escalating a parked gate at threshold $n: $(cat "$out")"
+    ack_stopped_cycle "$state" || fail "could not acknowledge unarmed-gate escalation $n"
+    grep -F "possible wedge, escalation $n" "$out" >/dev/null \
+      || fail "an unarmed home did not reach escalation $n: $(cat "$out")"
+    n=$((n + 1))
+  done
+  grep -F 'demand-deep-inspection: same pane has wedge-escalated 3 times in a row' "$out" >/dev/null \
+    || fail "an unarmed home lost the demand-deep-inspection wording: $(cat "$out")"
+  grep -F 'verified wait at a parked gate' "$out" >/dev/null \
+    && fail "an unarmed home deferred a parked gate: $(cat "$out")"
+  [ ! -e "$state/.waiting-resurfaced-$key" ] \
+    || fail "an unarmed home wrote the parked-gate recheck throttle"
+  unarmed_probes=$(wc -l < "$FM_FAKE_CREW_STATE_LOG" | tr -d ' ')
+  unset FM_FAKE_CREW_STATE_LOG
+
+  [ "$unarmed_probes" -eq 0 ] \
+    || fail "an unarmed home spent $unarmed_probes current-state read(s) on a parked gate over three thresholds"
+
+  # The same fixture with only the flag added, counted the same way, so the
+  # zero above is the flag's doing rather than a fixture that could never have
+  # reached the reader: one armed threshold must spend a read. A guard placed
+  # after the consult instead of before it would make both counts nonzero.
+  dir=$(wedge_threshold_fixture parked-gate-armed-probe-count "$escalated" 2000)
+  arm_parked_gate "$dir"
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  export FM_FAKE_CREW_STATE_LOG="$dir/crew-state.calls"
+  : > "$FM_FAKE_CREW_STATE_LOG"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "the armed control was never rechecked: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the armed control recheck"
+  armed_probes=$(wc -l < "$FM_FAKE_CREW_STATE_LOG" | tr -d ' ')
+  unset FM_FAKE_CREW_STATE_LOG
+  [ "$armed_probes" -gt 0 ] \
+    || fail "the armed control spent no current-state read, so the probe count proves nothing"
+  pass "with config/wedge-defer-parked-gate absent a parked gate keeps the unchanged ladder, wording and reads"
 }
 
 # --- a parked human-owed gate also needs the human to still owe an answer ----
@@ -3028,6 +3095,7 @@ test_wedge_threshold_parked_gate_needs_an_unanswered_decision() {
   dir=$(wedge_threshold_fixture parked-gate-decided \
     'needs-decision [key=nm-01RUNGATE-review]: the gate raised an authority question
 resolved [key=nm-01RUNGATE-review]: firstmate chose the second fix' 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   n=1
   while [ "$n" -le 3 ]; do
@@ -3046,6 +3114,7 @@ resolved [key=nm-01RUNGATE-review]: firstmate chose the second fix' 2000)
   # Parked at a human-owed gate, quiet, and the crewmate never escalated it: no
   # human has been told, so there is no wait to defer to.
   dir=$(wedge_threshold_fixture parked-gate-unescalated 'working: validation under way' 2000)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
     || fail "a human-owed gate nobody was told about never escalated: $(cat "$out")"
@@ -3060,6 +3129,7 @@ resolved [key=nm-01RUNGATE-review]: firstmate chose the second fix' 2000)
   # timer is already running - hence the fixture's fourth argument.
   dir=$(wedge_threshold_fixture parked-gate-blocked \
     'blocked [key=nm-01RUNGATE-review]: the fixture cannot reach its dependency' 2000 600)
+  arm_parked_gate "$dir"
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
     || fail "a human-owed gate with only a blocker open never escalated: $(cat "$out")"
@@ -5954,6 +6024,7 @@ test_wedge_threshold_defers_to_a_declared_wait_under_a_working_verdict
 test_wedge_threshold_recheck_names_the_captain_for_a_held_lane
 test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human
 test_wedge_threshold_parked_gate_needs_an_unanswered_decision
+test_wedge_threshold_parked_gate_is_off_until_armed
 test_wedge_defer_refuses_a_half_filled_wait_record
 test_open_captain_call_bounds_stale_churn
 test_stale_churn_without_a_captain_call_still_alarms

@@ -42,9 +42,10 @@
 #                          resume. Unless afk is active. A pane about to escalate
 #                          that can account for its quiet - a `paused:` external
 #                          wait or a verified `captain-held` transfer its worker
-#                          declared, or a validation gate of its own awaiting a
-#                          human decision nobody has answered yet - is deferred to
-#                          that same long recheck cadence instead
+#                          declared, or, where config/wedge-defer-parked-gate
+#                          arms it, a validation gate of its own awaiting a
+#                          supervisor decision nobody has answered yet - is
+#                          deferred to that same long recheck cadence instead
 #                          (wedge_wait_evidence), and a pane whose own task
 #                          worktree was written during the quiet window is
 #                          deferred rather than escalated (wedge_defer_writing),
@@ -973,6 +974,17 @@ wait_record() {  # <kind> <subject> <whom> <action> <age-record>
 # timer only through pause_state_class answering `working`, so its crew state is
 # a running step, never a parked gate.
 #
+# The second record is OFF unless the home creates config/wedge-defer-parked-gate,
+# and that one guard is what makes an unconfigured home's behaviour identical to
+# having no second record at all: it is read before the fold, so no fold or
+# crew-state read is spent, no wait record exists to defer on, no recheck wording
+# is reachable, and the lane keeps the unchanged escalation schedule, reason and
+# demand-deep-inspection wording. Unlike the status line, which is the worker's
+# own declaration about its own silence, this record is derived from a pipeline's
+# gate state, so which lanes lose the ladder for it is a home's choice to make
+# rather than a default every fleet inherits - the same reason
+# config/turnend-churn-absorb gates its own widened absorb.
+#
 # The second record takes TWO signals, and needs both. The crew's authoritative
 # current state must be a no-mistakes gate whose answer is owed by a HUMAN
 # (crew_gate_awaits_human_decision in fm-classify-lib.sh, minted from the
@@ -1029,6 +1041,7 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
       external 'confirm the wait still holds' "$statusf"
     return 0
   fi
+  [ -e "$CONFIG/wedge-defer-parked-gate" ] || return 1
   if status_has_open_needs_decision "$statusf" \
     && run=$(crew_gate_awaits_human_decision "$task") \
     && status_has_open_needs_decision "$statusf" "$run"; then
@@ -1062,14 +1075,13 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
 # exists: the one human who can answer it is away, the return brief already lists
 # it, and every other captain-facing path in this file absorbs it silently for
 # that reason (handle_paused_stale, surface_nonterminal_stale,
-# captain_call_stale_bound). That absorb arms no re-surface throttle and emits no
-# wake, so the recheck is owed once the record is archived rather than starting a
-# cadence nobody could act on. It does restart the idle timer, exactly as every
-# other deferral here does, because the evidence consult that reached it is the
-# costly read of the pair and an absorb that left the timer alone would repeat
-# that read on every poll for the whole away window. The consequence is the
-# bound stated plainly: the recheck owed on return arrives within one
-# STALE_ESCALATE_SECS of the record being archived rather than instantly.
+# captain_call_stale_bound). That absorb arms no throttle and leaves the idle
+# timer alone, so the recheck is owed in full the moment the record is archived
+# rather than starting a cadence nobody could act on. What reaches it is only
+# ever the captain-held record, whose evidence is one status-line read, so
+# repeating it per poll for the away window costs what it did before this
+# deferral existed; the costly parked-gate consult is owed to the supervisor
+# instead, never silenced here, and its own deferral restarts the timer below.
 # The escalation counter is left alone, exactly as the write deferral leaves it:
 # this is not an escalation, and a later genuine one must keep the
 # demand-inspection history it had already earned.
@@ -1104,8 +1116,6 @@ EOF
   fi
   key=$(window_key "$win")
   if [ "$whom" = captain ] && afk_record_present; then
-    clear_write_tracking "$key"
-    date +%s > "$since_file"
     triage_log "absorbed $label ($kind, never rechecked while the away-posture record exists): $win"
     return 0
   fi
@@ -1221,12 +1231,12 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
 # The wait-evidence consult (wedge_wait_evidence), the worktree write probe, and
 # the dead-record probe (wedge_dead_record) run ONLY here, inside the
 # at-threshold branch that is about to escalate: at most one each per window per
-# STALE_ESCALATE_SECS, never on an ordinary poll. That bound is what every
-# deferral below preserves by restarting the idle timer, the away-silenced absorb
-# in wedge_defer_wait included, so the crew-state read wedge_wait_evidence may
-# take is taken at most once per window per STALE_ESCALATE_SECS however long the
-# wait lasts. The wait consult runs first, because a pane that can account for
-# its own quiet has nothing to prove through its worktree. The dead-record probe
+# STALE_ESCALATE_SECS, never on an ordinary poll. The crew-state read
+# wedge_wait_evidence may take under config/wedge-defer-parked-gate keeps that
+# same bound however long the wait lasts, because the deferral it feeds restarts
+# the idle timer like every other deferral below; an unconfigured home never
+# reaches that read at all. The wait consult runs first, because a pane that can
+# account for its own quiet has nothing to prove through its worktree. The dead-record probe
 # runs last of the three, so the two cheaper deferrals keep the panes they
 # already own on their existing bounded cadences and only a pane that would
 # otherwise alarm pays for a backend read.
@@ -1357,12 +1367,13 @@ handle_paused_stale() {  # <window> <task> <hash>
 # the busy verdict, so this exception does not suppress undeclared wedges or
 # alter the separate non-busy classification. handle_paused_stale keeps the
 # exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS.
-# A pane that declared nothing falls through to the shared wedge timer, which
-# applies the same rule to the one wait a busy pane cannot declare: a validation
-# gate of its own awaiting a human decision that is still open also takes the
-# bounded recheck rather than the ladder, because who owes that answer does not
-# depend on what the pane is rendering, and the recheck names that human and the
-# action that clears it.
+# A pane that declared nothing falls through to the shared wedge timer, which,
+# in a home that armed config/wedge-defer-parked-gate, applies the same rule to
+# the one wait a busy pane cannot declare: a validation gate of its own awaiting
+# a supervisor decision that is still open also takes the bounded recheck rather
+# than the ladder, because who owes that answer does not depend on what the pane
+# is rendering, and the recheck names that supervisor and the action that clears
+# it. An unconfigured home keeps the unchanged ladder there.
 # Away mode remains daemon-owned and receives the undecorated wake identity for
 # its own classification, which is why the declaration is read before the afk
 # branch rather than after it.
