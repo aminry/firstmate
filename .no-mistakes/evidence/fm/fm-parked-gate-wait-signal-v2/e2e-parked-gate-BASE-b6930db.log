@@ -1,0 +1,48 @@
+driving bin/ from: /tmp/fm-base-bin.LTEwJG/bin
+
+=== crew-state verdict the REAL script derives from the human-owed gate payload ===
+state: parked · source: run-step · parked at review: 2 finding(s) (ask-user: authority decision) · run: 01RUNGATE
+
+=== what the watcher did with that lane (real bin/fm-watch.sh output) ===
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+FAIL: missing from watcher output: verified wait at a parked gate
+FAIL: missing from watcher output: awaiting firstmate's ask-user decision
+FAIL: missing from watcher output: decide the gate's ask-user finding and relay the decision to the crewmate
+FAIL: unexpected in watcher output: possible wedge
+FAIL: human-owed gate counted a wedge escalation
+
+=== the reported bug: repeated thresholds on the same correctly-parked lane ===
+FAIL: repeat round 1 did not complete
+FAIL: repeat round 2 did not complete
+FAIL: repeat round 3 did not complete
+FAIL: repeat round 4 did not complete
+wedge escalations counted for this lane: 5
+wedge wake payloads queued: 4
+possible-wedge lines in watcher output: 5
+FAIL: a correctly-parked lane kept counting wedge escalations
+
+=== crew-state verdict for the CREWMATE-owed gate (ask-user only as free text) ===
+state: parked · source: run-step · parked at review: 2 finding(s) (ask-user: authority decision) · run: 01RUNGATE
+
+=== watcher output for the crewmate-owed lane ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+
+=== human-owed gate, but the only open decision names another key ===
+
+=== watcher output (ladder must be kept) ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+
+=== human-owed gate whose decision was already ANSWERED (fold closed) ===
+
+=== watcher output (ladder must be kept) ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+
+=== human-owed gate under the AWAY-posture record (firstmate still owes it) ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+FAIL: missing from watcher output: awaiting firstmate's ask-user decision
+FAIL: unexpected in watcher output: possible wedge
+
+=== triage log for the away-posture lane ===
+[2026-09-19T13:57:22-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+
+LIVE SCENARIOS FAILED

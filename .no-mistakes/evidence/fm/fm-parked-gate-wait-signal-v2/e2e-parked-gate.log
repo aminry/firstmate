@@ -1,0 +1,43 @@
+
+=== crew-state verdict the REAL script derives from the human-owed gate payload ===
+state: parked · source: run-step · parked at review: 2 finding(s) · ask-user: authority decision · run: 01RUNGATE
+
+=== what the watcher did with that lane (real bin/fm-watch.sh output) ===
+stale: test:fm-wedge (idle 2s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+
+=== the reported bug: repeated thresholds on the same correctly-parked lane ===
+wedge escalations counted for this lane: 0
+wedge wake payloads queued: 0
+possible-wedge lines in watcher output: 0
+
+=== crew-state verdict for the CREWMATE-owed gate (ask-user only as free text) ===
+state: parked · source: run-step · parked at review: 2 finding(s) · run: 01RUNGATE
+
+=== watcher output for the crewmate-owed lane ===
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+
+=== human-owed gate, but the only open decision names another key ===
+
+=== watcher output (ladder must be kept) ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+
+=== human-owed gate whose decision was already ANSWERED (fold closed) ===
+
+=== watcher output (ladder must be kept) ===
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+
+=== human-owed gate under the AWAY-posture record (firstmate still owes it) ===
+stale: test:fm-wedge (idle 1s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+
+=== triage log for the away-posture lane ===
+[2026-09-19T13:58:39-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+
+=== adversarial: the findings table with its columns REORDERED ===
+state: parked · source: run-step · parked at review: 2 finding(s) · ask-user: authority decision · run: 01RUNGATE
+stale: test:fm-wedge (idle 1s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+
+=== adversarial: free text before the action column, description carrying ", ask-user," ===
+state: parked · source: run-step · parked at review: 1 finding(s) · run: 01RUNGATE
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+
+ALL LIVE SCENARIOS PASSED
