@@ -3067,9 +3067,14 @@ run_malformed_wait_record_round() {  # <name> <evidence-body>
       # shellcheck disable=SC1090,SC1091
       . "$1"
       wake() { :; }
+      # A live agent, so the dead-record probe that runs after a refused
+      # deferral keeps the unchanged ladder rather than reading a backend this
+      # child shell has none of.
+      fm_backend_agent_state() { printf alive; }
       eval "wedge_wait_evidence() { $2 ; }"
       wedge_timer_check "test:fm-wedge" "$FM_STATE_OVERRIDE/.stale-since-test_fm-wedge" \
-        "non-terminal stale" "$FM_STATE_OVERRIDE/.wedge-escalations-test_fm-wedge" wedge
+        "non-terminal stale" "$FM_STATE_OVERRIDE/.wedge-escalations-test_fm-wedge" wedge \
+        malformed-record-pane
     ' _ "$WATCH" "$body" > "$out" 2>&1 \
     || fail "the wedge timer failed on a malformed wait record ($name): $(cat "$out")"
   MALFORMED_STATE=$state
