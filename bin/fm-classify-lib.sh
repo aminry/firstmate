@@ -630,12 +630,21 @@ EOF
 # one, so it reads status_open_decisions rather than the incremental fold.
 # An unreadable, missing or symlinked status file folds to nothing and answers 1,
 # which is the safe answer for every caller: no evidence, no exception.
-status_has_open_needs_decision() {  # <status-file>
-  local open line
+# Given a <run-id>, only a decision whose key is exactly `nm-<run-id>-<step>` for
+# a non-empty step counts - the key shape the brief mandates for a gate
+# escalation - so an unrelated question left open earlier in the same task is
+# never read as firstmate being told about THIS run's gate.
+status_has_open_needs_decision() {  # <status-file> [<run-id>]
+  local run=${2-} open line key verb
   open=$(status_open_decisions "$1")
   [ -n "$open" ] || return 1
+  if [ $# -ge 2 ] && [ -z "$run" ]; then return 1; fi
   while IFS= read -r line; do
-    case "$line" in *$'\t'needs-decision$'\t'*) return 0 ;; esac
+    key=${line%%$'\t'*}
+    verb=${line#*$'\t'}; verb=${verb%%$'\t'*}
+    [ "$verb" = needs-decision ] || continue
+    [ $# -ge 2 ] || return 0
+    case "$key" in "nm-$run-"?*) return 0 ;; esac
   done <<EOF
 $open
 EOF
@@ -2010,11 +2019,15 @@ FM_GATE_HUMAN_DECISION='ask-user: authority decision'
 # The whole component is compared for equality rather than searched for, so a
 # gate name or a reconciliation note that happens to contain the words cannot
 # mint it downstream either.
+# On success it prints the reported run id, read from the line's whole
+# `run: <id>` component, so the caller can bind the gate to the decision that
+# names that run; a line carrying no run id is not evidence, since nothing could
+# then tie a decision to this gate.
 # Same cost and the same caveat as crew_absorb_class: one fm-crew-state.sh read,
 # which may make a bounded no-mistakes call, so callers take it only where they
 # already accept that cost.
-crew_gate_awaits_human_decision() {  # <id>
-  local id=$1 line state src rest part
+crew_gate_awaits_human_decision() {  # <id> -> <run-id> on stdout
+  local id=$1 line state src rest part human='' run=''
   [ -n "$id" ] || return 1
   line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null) || true
   case "$line" in state:*) ;; *) return 1 ;; esac
@@ -2026,9 +2039,12 @@ crew_gate_awaits_human_decision() {  # <id>
   while [ -n "$rest" ]; do
     part=${rest%% · *}
     rest=${rest#* · }
-    [ "$part" = "$FM_GATE_HUMAN_DECISION" ] && return 0
+    [ "$part" = "$FM_GATE_HUMAN_DECISION" ] && human=1
+    case "$part" in "run: "?*) run=${part#run: } ;; esac
   done
-  return 1
+  [ -n "$human" ] && [ -n "$run" ] || return 1
+  case "$run" in *[[:space:]]*) return 1 ;; esac
+  printf '%s\n' "$run"
 }
 
 # Directories excluded from the worktree write probe below, and the depth it walks.

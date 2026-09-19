@@ -2859,13 +2859,15 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
   # The gate's own findings table said a human owes this answer, so
   # bin/fm-crew-state.sh minted the human-decision component (its derivation from
   # the `action` column by position is pinned in tests/fm-crew-state.test.sh).
-  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision'
+  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision · run: 01RUNGATE'
+  # The same gate with no run component: nothing can tie a decision to it.
+  local runless='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision'
   # The same shape owed the crewmate itself. The gate name is free text carried
   # out of the run payload, so this one spells the whole marker inside it: a
   # consumer that searched the verdict for those words instead of comparing a
   # whole component for equality would read this lane as human-owed and take its
   # ladder away.
-  local crewmate='state: parked · source: run-step · parked at fix_review (ask-user: authority decision follow-up): 2 finding(s)'
+  local crewmate='state: parked · source: run-step · parked at fix_review (ask-user: authority decision follow-up): 2 finding(s) · run: 01RUNGATE'
 
   window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
 
@@ -2879,7 +2881,12 @@ test_wedge_threshold_defers_to_a_parked_gate_awaiting_a_human() {
   # The file is backdated well past the recheck cadence, and it is still not the
   # record of when this wait began, so nothing about the recheck may be computed
   # from its mtime.
-  local escalated='needs-decision: the gate raised an authority question [key=gate-1]
+  local escalated='needs-decision [key=nm-01RUNGATE-review]: the gate raised an authority question
+working: still parked at that gate'
+  # An open decision too, but under a key that names no run: an unrelated
+  # question raised earlier in the same task and never closed. It says nothing
+  # about whether anyone was told about THIS gate.
+  local unrelated='needs-decision [key=earlier-question]: which changelog section fits
 working: still parked at that gate'
 
   dir=$(wedge_threshold_fixture parked-gate-human "$escalated" 2000)
@@ -2888,10 +2895,12 @@ working: still parked at that gate'
     || fail "a gate awaiting a human was never rechecked at the threshold: $(cat "$out")"
   grep -F 'verified wait at a parked gate' "$out" >/dev/null \
     || fail "the parked-gate recheck did not name its evidence: $(cat "$out")"
-  grep -F "awaiting the captain's ask-user decision" "$out" >/dev/null \
-    || fail "the parked-gate recheck did not name the human the wait is on: $(cat "$out")"
-  grep -F "answer the gate's ask-user finding" "$out" >/dev/null \
+  grep -F "awaiting firstmate's ask-user decision" "$out" >/dev/null \
+    || fail "the parked-gate recheck did not name firstmate as the one the wait is on: $(cat "$out")"
+  grep -F "decide the gate's ask-user finding and relay the decision to the crewmate" "$out" >/dev/null \
     || fail "the parked-gate recheck did not name the action that clears the lane: $(cat "$out")"
+  grep -F 'awaiting the captain' "$out" >/dev/null \
+    && fail "the parked-gate recheck named the captain for a decision firstmate owns: $(cat "$out")"
   grep -F 'confirm the wait still holds' "$out" >/dev/null \
     && fail "a parked gate borrowed the external-wait action, which does not clear it: $(cat "$out")"
   grep -F 'possible wedge' "$out" >/dev/null \
@@ -2936,34 +2945,61 @@ working: still parked at that gate'
   grep -F 'verified wait at a parked gate' "$out" >/dev/null \
     && fail "a gate awaiting the crewmate was deferred as a wait on a human: $(cat "$out")"
 
-  # The wait is on a human who may be away, so this recheck obeys the
-  # away-posture record exactly as every other captain-facing path here does:
-  # absorbed in silence, and with no throttle armed, so the recheck is owed in
-  # full the moment the record is archived rather than starting a cadence nobody
-  # could act on.
+  # The wait is owed by firstmate, not the captain, so the captain-away silence
+  # does not apply: under away posture the supervision branch is the actor
+  # allowed to answer it, and it keeps the long recheck cadence throughout.
   dir=$(wedge_threshold_fixture parked-gate-away "$escalated" 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   write_away_record "$state"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+    || fail "a parked gate owed firstmate's decision was silenced while the away-posture record existed: $(cat "$out")"
+  grep -F "awaiting firstmate's ask-user decision" "$out" >/dev/null \
+    || fail "the away-posture parked-gate recheck did not name firstmate: $(cat "$out")"
+  grep -F 'possible wedge' "$out" >/dev/null \
+    && fail "an away-posture parked gate was reported as a possible wedge: $(cat "$out")"
+  grep -F 'never rechecked while the away-posture record exists' "$state/.watch-triage.log" >/dev/null \
+    && fail "a parked gate owed firstmate took the captain-away silence: $(cat "$state/.watch-triage.log")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the away-posture parked-gate recheck"
+  queued=$(wedge_stale_wakes "$state" "$window")
   n=1
   while [ "$n" -le 3 ]; do
     wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" absorb \
-      || fail "a parked gate was rechecked at threshold $n while the away-posture record existed: $(cat "$out")"
+      || fail "an away-posture parked gate wedge-escalated at threshold $n: $(cat "$out")"
     n=$((n + 1))
   done
-  [ "$(wedge_stale_wakes "$state" "$window")" -eq 0 ] \
-    || fail "a parked gate woke the away captain: $(cat "$state/.wake-queue")"
-  [ ! -e "$state/.waiting-resurfaced-$key" ] \
-    || fail "an away-silenced parked gate armed the recheck throttle, so the recheck owed on return would be delayed a full cadence"
+  [ "$(wedge_stale_wakes "$state" "$window")" -eq "$queued" ] \
+    || fail "an away-posture parked gate queued a further wake inside its recheck cadence: $(cat "$state/.wake-queue")"
   [ ! -e "$state/.wedge-escalations-$key" ] \
-    || fail "an away-silenced parked gate counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
-  archive_away_record "$state"
-  : > "$out"
-  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
-    || fail "a parked gate was never rechecked after the away-posture record was archived: $(cat "$out")"
-  grep -F "answer the gate's ask-user finding" "$out" >/dev/null \
-    || fail "the recheck owed on return did not name the action that clears the gate: $(cat "$out")"
-  ack_stopped_cycle "$state" || fail "could not acknowledge the on-return parked-gate recheck"
-  pass "a gate awaiting a human is rechecked on the long cadence naming that human and the action that clears it, while a gate awaiting the crewmate keeps the unchanged ladder"
+    || fail "an away-posture parked gate counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
+
+  # An open decision under an unrelated key does not bind to this gate, so the
+  # lane keeps the unchanged ladder: nothing says anyone was told about it.
+  dir=$(wedge_threshold_fixture parked-gate-unrelated-key "$unrelated" 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  n=1
+  while [ "$n" -le 3 ]; do
+    wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
+      || fail "a gate with only an unrelated open decision stopped escalating at threshold $n: $(cat "$out")"
+    ack_stopped_cycle "$state" || fail "could not acknowledge unrelated-key escalation $n"
+    grep -F "possible wedge, escalation $n" "$out" >/dev/null \
+      || fail "a gate with only an unrelated open decision did not reach escalation $n: $(cat "$out")"
+    n=$((n + 1))
+  done
+  grep -F 'demand-deep-inspection: same pane has wedge-escalated 3 times in a row' "$out" >/dev/null \
+    || fail "a gate with only an unrelated open decision lost the demand-deep-inspection wording: $(cat "$out")"
+  grep -F 'verified wait at a parked gate' "$out" >/dev/null \
+    && fail "an unrelated open decision was read as this gate's wait: $(cat "$out")"
+
+  # A verdict naming no run cannot be bound to any decision, so it keeps the
+  # ladder even with the run-shaped key open.
+  dir=$(wedge_threshold_fixture parked-gate-runless "$escalated" 2000)
+  state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$runless" exit \
+    || fail "a runless human-owed gate never escalated: $(cat "$out")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the runless-gate escalation"
+  grep -F 'possible wedge, escalation 1' "$out" >/dev/null \
+    || fail "a runless human-owed gate did not take the unchanged ladder: $(cat "$out")"
+  pass "a gate awaiting firstmate's decision for its own run is rechecked on the long cadence in either posture, while a crewmate-owed gate, an unrelated open decision and a runless verdict keep the unchanged ladder"
 }
 
 # --- a parked human-owed gate also needs the human to still owe an answer ----
@@ -2972,17 +3008,17 @@ working: still parked at that gate'
 # the run stays parked, and the row stays in the table, until the CREWMATE relays
 # the decision with `axi respond`. So a lane that is quiet because the crewmate
 # wedged before relaying an answer it already has would read exactly like a lane
-# waiting on the captain - and would lose the ladder for the one failure the
+# waiting on firstmate - and would lose the ladder for the one failure the
 # ladder exists to catch.
 # The task's own decision fold is the record that closes that hole, because it is
 # written at ANSWER time rather than at relay time: `fm-send --resolve-key`
-# appends the closing `resolved` line the moment the captain answers. An open
+# appends the closing `resolved` line the moment the decision is answered. An open
 # `needs-decision` therefore means the human was told and has not answered; its
 # absence means the outstanding move belongs to the crewmate, or that nobody was
 # ever told at all. Each of those keeps the unchanged schedule below.
 test_wedge_threshold_parked_gate_needs_an_unanswered_decision() {
   local dir state fakebin out capture window key n
-  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision'
+  local human='state: parked · source: run-step · parked at awaiting_approval: 2 finding(s) · ask-user: authority decision · run: 01RUNGATE'
   window="test:fm-wedge"; key=$(printf '%s' "$window" | tr ':/.' '___')
 
   # Answered, not yet relayed. The gate verdict is byte-identical to the one the
@@ -2990,8 +3026,8 @@ test_wedge_threshold_parked_gate_needs_an_unanswered_decision() {
   # `resolved:` verb is not captain-relevant, so this lane takes the same plain
   # non-terminal route into the wedge timer as that one.
   dir=$(wedge_threshold_fixture parked-gate-decided \
-    'needs-decision: the gate raised an authority question [key=gate-1]
-resolved: the captain chose the second fix [key=gate-1]' 2000)
+    'needs-decision [key=nm-01RUNGATE-review]: the gate raised an authority question
+resolved [key=nm-01RUNGATE-review]: firstmate chose the second fix' 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   n=1
   while [ "$n" -le 3 ]; do
@@ -3023,7 +3059,7 @@ resolved: the captain chose the second fix [key=gate-1]' 2000)
   # overridden-terminal-status branch instead, which only ever sees a hash whose
   # timer is already running - hence the fixture's fourth argument.
   dir=$(wedge_threshold_fixture parked-gate-blocked \
-    'blocked: the fixture cannot reach its dependency [key=gate-1]' 2000 600)
+    'blocked [key=nm-01RUNGATE-review]: the fixture cannot reach its dependency' 2000 600)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
   wedge_threshold_round "$state" "$fakebin" "$out" "$capture" "$window" "$human" exit \
     || fail "a human-owed gate with only a blocker open never escalated: $(cat "$out")"

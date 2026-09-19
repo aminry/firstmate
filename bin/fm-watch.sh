@@ -931,8 +931,9 @@ wedge_defer_writing() {  # <window> <since-file> <triage-label> <idle-age>
 # reach wedge_defer_wait without deciding all of them.
 #   <kind>       what the evidence IS, as the recheck names it.
 #   <subject>    WHO the wait is on, in the recheck's own words.
-#   <whom>       `captain` when that subject is the captain, `external`
-#                otherwise; this is what applies the away-posture rule below.
+#   <whom>       `captain` when that subject is the captain, `supervisor` when
+#                it is firstmate itself, `external` otherwise; this is what
+#                applies the away-posture rule below, which only `captain` takes.
 #   <action>     the one thing that clears the lane.
 #   <age-record> the file whose mtime is when this wait started, or EMPTY when
 #                the wait has no written record. Empty is a real answer, not a
@@ -976,12 +977,20 @@ wait_record() {  # <kind> <subject> <whom> <action> <age-record>
 # current state must be a no-mistakes gate whose answer is owed by a HUMAN
 # (crew_gate_awaits_human_decision in fm-classify-lib.sh, minted from the
 # findings table's `action` column by position), AND the task's own decision fold
-# must still hold an open `needs-decision` record. The gate's table alone says
-# only who the answer is owed BY; the open decision is the positive evidence that
-# the human was actually told and has not answered yet, which is what makes the
-# lane's quiet a wait rather than a suspected wedge. The two come apart in both
-# directions, and the ladder is kept in each:
-#   - the captain ANSWERED and the crewmate has not yet relayed it with
+# must still hold an open `needs-decision` record whose key is `nm-<run>-<step>`
+# for the run that verdict reports. The gate's table alone says only that the
+# answer is owed by a human; the open decision bound to that run is the positive
+# evidence that firstmate was actually told about THIS gate and has not answered
+# yet, which is what makes the lane's quiet a wait rather than a suspected wedge.
+# An open decision under any other key - an unrelated question never closed - is
+# not that evidence, and neither is a verdict that names no run. The wait is owed
+# by firstmate, not the captain: ask-user findings are routed to firstmate, which
+# decides most of them itself, and one it escalates becomes a captain-held
+# transfer that the first record above already catches. So the away-posture
+# silence does not apply to it: under away posture the supervision branch is the
+# actor allowed to answer it, and it is rechecked on the long cadence throughout.
+# The two signals come apart in both directions, and the ladder is kept in each:
+#   - the decision was ANSWERED and the crewmate has not yet relayed it with
 #     `axi respond`: the gate is still reported parked and still carries the
 #     ask-user row, but `fm-send --resolve-key` wrote the closing `resolved` line
 #     at answer time, so the fold is empty and what is outstanding is the
@@ -999,10 +1008,11 @@ wait_record() {  # <kind> <subject> <whom> <action> <age-record>
 # open, a key convention nobody followed) escalates on the unchanged schedule
 # rather than losing the ladder. The status-line and fold reads are file reads;
 # the crew-state read is the costly one (it may make a bounded no-mistakes call),
-# so it is taken last, behind the fold, and only in the at-threshold branch - at
-# most once per window per STALE_ESCALATE_SECS, never on an ordinary poll.
+# so it is taken only behind a first fold read that finds some open
+# `needs-decision` at all, and only in the at-threshold branch - at most once per
+# window per STALE_ESCALATE_SECS, never on an ordinary poll.
 wedge_wait_evidence() {  # <task> -> one wait_record on stdout
-  local task=$1 last until statusf
+  local task=$1 last until statusf run
   [ -n "$task" ] || return 1
   statusf="$STATE/$task.status"
   last=$(last_status_line "$statusf")
@@ -1019,9 +1029,11 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
       external 'confirm the wait still holds' "$statusf"
     return 0
   fi
-  if status_has_open_needs_decision "$statusf" && crew_gate_awaits_human_decision "$task"; then
-    wait_record 'verified wait at a parked gate' "awaiting the captain's ask-user decision" \
-      captain "answer the gate's ask-user finding" ''
+  if status_has_open_needs_decision "$statusf" \
+    && run=$(crew_gate_awaits_human_decision "$task") \
+    && status_has_open_needs_decision "$statusf" "$run"; then
+    wait_record 'verified wait at a parked gate' "awaiting firstmate's ask-user decision" \
+      supervisor "decide the gate's ask-user finding and relay the decision to the crewmate" ''
     return 0
   fi
   return 1
@@ -1070,8 +1082,8 @@ $record
 EOF
   # Enforce the whole of the record's own contract here, which the US delimiter
   # now makes checkable: `kind`, `subject`, `whom` and `action` are each a field
-  # the recheck prints and must be non-empty, `whom` is exactly one of the two
-  # values the away-posture rule below tests for, only `anchor` may legitimately
+  # the recheck prints and must be non-empty, `whom` is exactly one of the three
+  # values the record contract names, only `anchor` may legitimately
   # be empty, and the record holds exactly four delimiters - a surplus one is
   # visible because `read` puts everything past the last field into `anchor`.
   # A record that fails any of these is refused rather than deferred: deferring
@@ -1079,7 +1091,7 @@ EOF
   # escalation the caller was about to make.
   ok=1
   case "$whom" in
-    captain|external) ;;
+    captain|supervisor|external) ;;
     *) ok=0 ;;
   esac
   case "$anchor" in
