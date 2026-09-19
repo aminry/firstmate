@@ -2757,7 +2757,7 @@ test_wedge_threshold_defers_to_a_declared_wait_under_a_working_verdict() {
 # confirm points them away from the only action that ends the wait. The sibling
 # absorber makes exactly this distinction, and a lane routed here must not lose it.
 test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
-  local dir state fakebin out capture window key n
+  local dir state fakebin out capture window key n armed_timer
   local working='state: working · source: run-step · ci running'
 
   dir=$(wedge_threshold_fixture captain-held-wait \
@@ -2801,9 +2801,12 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
   # at once rather than waiting out a cadence that started while the captain was
   # away. Same fixture and same age as the attended leg above, which is what makes
   # the difference attributable to the record alone.
+  # The idle timer is pre-armed well past the threshold, so every round below
+  # reaches the absorb with the same timer value and a restart would be visible.
   dir=$(wedge_threshold_fixture captain-held-away \
-    'captain-held: which retention window wins' 2000)
+    'captain-held: which retention window wins' 2000 2000)
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"; capture="$dir/pane.txt"
+  armed_timer=$(cat "$state/.stale-since-$key")
   write_away_record "$state"
   n=1
   while [ "$n" -le 3 ]; do
@@ -2821,6 +2824,8 @@ test_wedge_threshold_recheck_names_the_captain_for_a_held_lane() {
     || fail "an away-silenced hold counted $(cat "$state/.wedge-escalations-$key") wedge escalation(s)"
   grep -F 'never rechecked while the away-posture record exists' "$state/.watch-triage.log" >/dev/null \
     || fail "the away-silenced hold was not recorded in the triage log: $(cat "$state/.watch-triage.log")"
+  [ "$(cat "$state/.stale-since-$key")" = "$armed_timer" ] \
+    || fail "an away-silenced hold restarted the idle timer, so part of the away window would be spent against the cadence the recheck owed on return uses"
 
   # And the recheck is owed in full the moment the captain is back: the absorb
   # above leaves the idle timer alone, so no part of the away window is spent
