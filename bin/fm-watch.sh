@@ -1075,13 +1075,16 @@ wedge_wait_evidence() {  # <task> -> one wait_record on stdout
 # exists: the one human who can answer it is away, the return brief already lists
 # it, and every other captain-facing path in this file absorbs it silently for
 # that reason (handle_paused_stale, surface_nonterminal_stale,
-# captain_call_stale_bound). That absorb arms no throttle and leaves the idle
-# timer alone, so the recheck is owed in full the moment the record is archived
-# rather than starting a cadence nobody could act on. What reaches it is only
-# ever the captain-held record, whose evidence is one status-line read, so
-# repeating it per poll for the away window costs what it did before this
-# deferral existed; the costly parked-gate consult is owed to the supervisor
-# instead, never silenced here, and its own deferral restarts the timer below.
+# captain_call_stale_bound). That absorb arms no throttle and deliberately
+# leaves the idle timer alone: a `captain` whom is minted only by the
+# captain-held arm of wedge_wait_evidence, which returns before the
+# wedge-defer-parked-gate flag test and therefore before any decision-fold or
+# current-state read, so the only read that repeats under the away record is the
+# one status-line read that predates this deferral. There is nothing costly to
+# throttle there, so the recheck owed on return stays owed in full the moment the
+# record is archived rather than starting a cadence nobody could act on. The
+# costly parked-gate consult is owed to the supervisor instead, never silenced
+# here, and its own deferral restarts the timer below.
 # The escalation counter is left alone, exactly as the write deferral leaves it:
 # this is not an escalation, and a later genuine one must keep the
 # demand-inspection history it had already earned.

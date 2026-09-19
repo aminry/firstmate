@@ -3583,9 +3583,13 @@ test_captured_axi_status_shapes() {
     assert_contains "$out" '01NEW' "captured $shape preserves the selected identity"
     if [ "$shape" = parked ]; then
       assert_contains "$out" 'parked at test: 1 finding(s)' 'the captured gate retains its actual step and finding count'
+      assert_contains "$out" ' · ask-user: authority decision' \
+        'the captured gate mints the human-decision component from the real column layout'
       toolbin=$(make_no_python_toolbin "$d")
       out=$(PATH="$d/fakebin:$toolbin" FM_STATE_OVERRIDE="$d/state" "$CREW_STATE" competing)
       assert_contains "$out" 'parked at test: 1 finding(s)' 'a complete captured gate remains readable without Python'
+      assert_contains "$out" ' · ask-user: authority decision' \
+        'the captured gate mints the human-decision component without Python'
       assert_contains "$out" '01NEW' 'the captured gate retains its id without Python'
     fi
     pass "captured AXI $shape status replays through crew-state"
