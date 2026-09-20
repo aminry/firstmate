@@ -465,7 +465,12 @@ nm_gate_findings_count() {
 # actions, and the payload also carries the branch name and step names, so a
 # gate owed the crewmate's own answer would match just as readily as one owed a
 # human. Column order is read from the header rather than assumed, so a table
-# that grows a column keeps answering correctly.
+# that grows a column keeps answering correctly. Both the header match and the
+# row scan require the BRACE, so the count, the index and the rows all come from
+# the same block: an earlier unbraced `findings[N]:` line from a resolved round
+# must not supply the rows while the braced gate table supplies the index, which
+# would read the wrong block's rows at the right block's offset
+# (tests/fm-crew-state.test.sh's unbraced-precursor case pins it).
 #
 # Reading the index out of the header and then walking RAW COMMAS to it is only
 # positional in name: the walk is sound only while every column before `action`
