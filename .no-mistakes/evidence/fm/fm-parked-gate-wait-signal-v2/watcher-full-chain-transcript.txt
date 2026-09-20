@@ -1,0 +1,50 @@
+================ A. ARMED home, captured human-owed gate, decision open under nm-<run>-test
+### lane full-chain-armed  armed=1 away=0
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: ask-user findings=test-1 file=/tmp/nm-findings.txt
+    working: still parked at that gate
+### the gate's own findings table, from the captured producer payload:
+    24:  findings[1]{id,severity,file,action,description}:
+### crew-state verdict the watcher reads (REAL bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### watcher stdout - what the supervisor is told:
+    stale: test:fm-wedge (idle 2s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+### wedge escalation counter: (none)
+### triage log:
+    [2026-09-19T19:17:54-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+
+================ B. ARMED home, same lane, AWAY-POSTURE record present
+### away-posture record present: YES (/private/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/pgw-full-chain.EGXgnN/full-chain-away/state/.afk-contract )
+### lane full-chain-away  armed=1 away=1
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: ask-user findings=test-1 file=/tmp/nm-findings.txt
+    working: still parked at that gate
+### the gate's own findings table, from the captured producer payload:
+    24:  findings[1]{id,severity,file,action,description}:
+### crew-state verdict the watcher reads (REAL bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### watcher stdout - what the supervisor is told:
+    stale: test:fm-wedge (idle 2s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+### wedge escalation counter: (none)
+### triage log:
+    [2026-09-19T19:18:01-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+
+================ C. UNARMED home, byte-identical fixture (3 rounds)
+### lane full-chain-unarmed  armed=0 away=0
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: ask-user findings=test-1 file=/tmp/nm-findings.txt
+    working: still parked at that gate
+### the gate's own findings table, from the captured producer payload:
+    24:  findings[1]{id,severity,file,action,description}:
+### crew-state verdict the watcher reads (REAL bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### watcher stdout - what the supervisor is told:
+    stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+    stale: test:fm-wedge (idle 2s, possible wedge, escalation 2)
+    stale: test:fm-wedge (idle 1s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+### wedge escalation counter: 3
+### triage log:
+    [2026-09-19T19:18:05-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+    [2026-09-19T19:18:09-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+    [2026-09-19T19:18:13-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+

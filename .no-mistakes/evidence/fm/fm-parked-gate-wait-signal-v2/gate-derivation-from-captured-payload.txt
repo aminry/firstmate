@@ -1,0 +1,33 @@
+Real bin/fm-crew-state.sh driven over a real throwaway git worktree, with a fake
+no-mistakes CLI serving the CAPTURED no-mistakes v1.70.1 gate payload
+(tests/captures/no-mistakes-v1.70.1/parked.toon), plus three variants of that same
+captured payload that attack the positional derivation.
+
+### REAL captured gate - action column is ask-user
+    findings header and row (truncated):
+        findings[1]{id,severity,file,action,description}:
+          test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live again
+    verdict line the watcher consumes:
+      state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+
+### crewmate-owed gate - action is auto-fix, description QUOTES 'ask-user: authority decision'
+    findings header and row (truncated):
+        findings[1]{id,severity,file,action,description}:
+          test-1,warning,"",auto-fix,"ask-user: authority decision was requested earlier; this change has no live-validatable surface; proceed without live 
+    verdict line the watcher consumes:
+      state: parked · source: run-step · parked at test: 1 finding(s) · run: 01M20NDQH0G96AQYH1EHWGKT5F
+
+### free-text column placed BEFORE action, its value contains a comma
+    findings header and row (truncated):
+        findings[1]{id,severity,summary,action,description}:
+          test-1,warning,"needs a human, urgently",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios
+    verdict line the watcher consumes:
+      state: parked · source: run-step · parked at test: 1 finding(s) · run: 01M20NDQH0G96AQYH1EHWGKT5F
+
+### known columns REORDERED, action first
+    findings header and row (truncated):
+        findings[1]{action,id,severity,file,description}:
+          ask-user,test-1,warning,"","this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live again
+    verdict line the watcher consumes:
+      state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+

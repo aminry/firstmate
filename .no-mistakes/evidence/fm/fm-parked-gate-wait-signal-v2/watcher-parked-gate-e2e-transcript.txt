@@ -1,0 +1,299 @@
+END-TO-END WATCHER TRANSCRIPTS
+
+Each scenario stands up an isolated firstmate home (state/, config/, a real throwaway
+git worktree) and runs the REAL bin/fm-watch.sh against the REAL bin/fm-crew-state.sh,
+which reads a CAPTURED no-mistakes v1.70.1 gate payload through a fake no-mistakes CLI.
+Only the terminal backend (tmux) and the no-mistakes CLI transport are stand-ins.
+FM_STALE_ESCALATE_SECS=1 puts every poll at the wedge threshold.
+
+NOTE: two batch-1 entries are superseded. armed-cadence-absorb was mis-specified (a
+fresh lane always surfaces its FIRST recheck; batch 2's armed-long-cadence covers the
+cadence properly), and unarmed-home lost its summary when its driver file was edited
+mid-run; it is re-run in batch 3.
+
+
+================================================================
+SCENARIO: armed-human-gate
+================================================================
+### lane: armed-human-gate  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 32s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+### triage log:
+    [2026-09-19T17:10:39-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: (none)
+### parked-gate recheck throttle: present
+### current-state reads spent: 1
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+
+================================================================
+SCENARIO: armed-cadence-absorb
+================================================================
+### lane: armed-cadence-absorb  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=absorb)
+/tmp/nm-e2e/stage2-watch-e2e.sh: line 92: wait_poll_cycle: command not found
+ROUND_FAILED mode=absorb round=1
+--- watcher stdout so far:
+--- triage log:
+SCENARIO_EXIT=1
+
+================================================================
+SCENARIO: unarmed-home
+================================================================
+### lane: unarmed-home  (config/wedge-defer-parked-gate: absent)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### round 2 (watcher at the wedge threshold, mode=exit)
+### round 3 (watcher at the wedge threshold, mode=exit)
+/tmp/nm-e2e/drive.sh: line 51: syntax error near unexpected token `('
+/tmp/nm-e2e/drive.sh: line 51: `echo "### watcher stdout (what the supervisor is told):"'
+SCENARIO_EXIT=2
+
+================================================================
+SCENARIO: crewmate-owed-gate
+================================================================
+### lane: crewmate-owed-gate  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",auto-fix,"ask-user: authority decision was requested earlier; this change has no live-validatable surface; proceed without live validation
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 42s, possible wedge, escalation 1)
+### triage log:
+    [2026-09-19T17:23:24-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 1
+### parked-gate recheck throttle: absent
+### current-state reads spent: 1
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+
+================================================================
+SCENARIO: free-text-before-action
+================================================================
+### lane: free-text-before-action  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,summary,action,description}:
+        test-1,warning,"needs a human, urgently",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driv
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 37s, possible wedge, escalation 1)
+### triage log:
+    [2026-09-19T17:27:40-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 1
+### parked-gate recheck throttle: absent
+### current-state reads spent: 1
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+
+================================================================
+SCENARIO: unrelated-open-decision
+================================================================
+### lane: unrelated-open-decision  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=earlier-question]: which changelog section fits
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 41s, possible wedge, escalation 1)
+### triage log:
+    [2026-09-19T17:31:49-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 1
+### parked-gate recheck throttle: absent
+### current-state reads spent: 1
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+
+================================================================
+SCENARIO: answered-not-relayed
+================================================================
+### lane: answered-not-relayed  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    resolved [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: proceed without live validation
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 20s, possible wedge, escalation 1)
+### triage log:
+    [2026-09-19T17:35:16-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 1
+### parked-gate recheck throttle: absent
+### current-state reads spent: 0
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+ALL_EXIT=0
+
+############ batch 2: long cadence, and a blocked record ############
+
+================================================================
+SCENARIO: armed-long-cadence
+================================================================
+### lane: armed-long-cadence  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### round 2 (watcher at the wedge threshold, mode=absorb)
+### round 3 (watcher at the wedge threshold, mode=absorb)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 30s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+### triage log:
+    [2026-09-19T17:39:40-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+    [2026-09-19T17:45:03-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 222s): test:fm-wedge
+    [2026-09-19T17:46:07-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 52s): test:fm-wedge
+    [2026-09-19T17:46:29-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 17s): test:fm-wedge
+    [2026-09-19T17:46:56-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 22s): test:fm-wedge
+    [2026-09-19T17:47:20-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 17s): test:fm-wedge
+    [2026-09-19T17:47:39-0700] absorbed non-terminal stale (verified wait at a parked gate explains the quiet, idle 13s): test:fm-wedge
+### wedge escalation counter: (none)
+### parked-gate recheck throttle: present
+### current-state reads spent: 7
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+
+================================================================
+SCENARIO: blocked-record-only
+================================================================
+### lane: blocked-record-only  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    blocked [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate cannot proceed
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 26s, possible wedge, escalation 1)
+### triage log:
+    [2026-09-19T17:48:40-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 1
+### parked-gate recheck throttle: absent
+### current-state reads spent: 0
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+ALL_EXIT=0
+
+############ batch 3: the unarmed home (default-off) ############
+
+================================================================
+SCENARIO: unarmed-home
+================================================================
+### lane: unarmed-home  (config/wedge-defer-parked-gate: absent)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### round 1 (watcher at the wedge threshold, mode=exit)
+### round 2 (watcher at the wedge threshold, mode=exit)
+### round 3 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 44s, possible wedge, escalation 1)
+    stale: test:fm-wedge (idle 34s, possible wedge, escalation 2)
+    stale: test:fm-wedge (idle 28s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+### triage log:
+    [2026-09-19T17:51:44-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+    [2026-09-19T17:55:28-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+    [2026-09-19T17:57:56-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: 3
+### parked-gate recheck throttle: absent
+### current-state reads spent: 0
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+ALL_EXIT=0
+
+############ batch 4: away posture ############
+================================================================
+SCENARIO: away-posture-parked-gate
+  The captain is away (a confirmed away-posture record exists). A hold owed
+  the CAPTAIN is silenced in that posture; a parked gate owed the SUPERVISOR
+  must NOT be, because the away supervision branch is the actor allowed to
+  answer it. Expect the recheck naming firstmate, no wedge, and no
+  'never rechecked while the away-posture record exists' absorb.
+================================================================
+### lane: away-posture-gate  (config/wedge-defer-parked-gate: ARMED)
+### status log (the task's decision fold):
+    needs-decision [key=nm-01M20NDQH0G96AQYH1EHWGKT5F-test]: the gate raised an authority question
+    working: still parked at that gate
+### gate findings row the pipeline reports:
+      findings[1]{id,severity,file,action,description}:
+        test-1,warning,"",ask-user,"this change has no live-validatable surface; proceed without live validation? (0 of 4 scenarios were driven live against the pro
+    help[2]: The explicitly selected gate for run 01M20NDQH0G96AQYH1EHWGKT5F is inspection-only; no run-scoped response command exists,Run `no-mistakes axi logs --r
+### crew-state verdict the watcher reads (real bin/fm-crew-state.sh):
+    state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01M20NDQH0G96AQYH1EHWGKT5F
+### away-posture record: present
+### round 1 (watcher at the wedge threshold, mode=exit)
+### watcher stdout (what the supervisor is told):
+    stale: test:fm-wedge (idle 28s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+### triage log:
+    [2026-09-19T18:04:44-0700] absorbed non-terminal stale timer reset: test:fm-wedge
+### wedge escalation counter: (none)
+### parked-gate recheck throttle: present
+### current-state reads spent: 1
+### stale wakes queued: 0
+SCENARIO_EXIT=0
+ALL_EXIT=0

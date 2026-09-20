@@ -1,0 +1,23 @@
+Live check at HEAD: config/wedge-defer-parked-gate is NOT inherited by a secondmate home.
+
+$ bash -c ". bin/fm-config-inherit-lib.sh; propagate_secondmate_inheritance <primary> <secondmate>"
+
+primary home config/ before propagation:
+  trace-context
+  wedge-defer-parked-gate
+secondmate home config/ after propagation:
+  trace-context
+
+declared inherited material (fm_config_inherit_items):
+  config/crew-dispatch.json
+  config/crew-harness
+  config/backlog-backend
+  config/backend
+  config/herdr-presentation-spaces
+  config/startup-memory-budget
+  config/trace-context
+  config/launch-env-allowlist
+  config/claude-permission-mode
+  data/captain-shared.md
+
+The inherited flag trace-context crosses; wedge-defer-parked-gate stays home-local.

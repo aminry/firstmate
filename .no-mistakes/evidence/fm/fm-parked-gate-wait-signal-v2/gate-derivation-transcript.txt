@@ -1,0 +1,38 @@
+# Gate human-decision derivation, driven through the real bin/fm-crew-state.sh CLI
+
+Each block runs the real reader against a hermetic home whose `no-mistakes axi status`
+serves the shown run payload. The printed line is the crew-state verdict the watcher consumes.
+
+## A. Real captured producer gate (tests/captures/no-mistakes-v1.70.1/parked.toon)
+   header: findings[1]{id,severity,file,action,description}   row action = ask-user
+   expected: mints " · ask-user: authority decision"
+
+$ bin/fm-crew-state.sh lane
+state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01NEW
+
+## B. Adversarial: an UNBRACED findings[2]: block carrying ask-user at the same comma
+   offset, placed ahead of the live braced gate whose only row action is auto-fix.
+   This gate is owed the CREWMATE, so the component must be ABSENT and the ladder kept.
+
+  findings[2]:
+    prior-1,warning,a.go,ask-user,an earlier already-resolved block
+    prior-2,info,b.go,ask-user,another earlier row
+  findings[1]{id,severity,file,action,description}:
+    r1,warning,a.go,auto-fix,the live gate is owed to the crewmate
+gate: review
+
+$ bin/fm-crew-state.sh lane
+state: parked · source: run-step · parked at review: 2 finding(s) · run: 01NEW
+
+## C. Non-vacuity control: the SAME payload B against a copy of bin/fm-crew-state.sh with
+   the one-character awk anchor reverted (findings\[[0-9]+\] instead of findings\[[0-9]+\]\{).
+   Pre-fix behaviour: the component is wrongly minted and the crewmate-owed gate loses its ladder.
+
+$ bin/fm-crew-state.sh lane   # reverted copy
+state: parked · source: run-step · parked at review: 2 finding(s) · ask-user: authority decision · run: 01NEW
+
+## D. Over-breadth control: payload A against the same reverted copy - the real gate mints
+   in both, so the tightening refuses only the wrong-block walk.
+
+$ bin/fm-crew-state.sh lane   # reverted copy
+state: parked · source: run-step · parked at test: 1 finding(s) · ask-user: authority decision · run: 01NEW

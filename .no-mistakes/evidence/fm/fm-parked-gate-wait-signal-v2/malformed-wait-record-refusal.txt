@@ -1,0 +1,30 @@
+# Adversarial: a half-filled wait record must be REFUSED, not deferred
+
+Each case drives the REAL wedge_timer_check in bin/fm-watch.sh with a
+wedge_wait_evidence override emitting the shown record, and reads back the
+durable wake queue the watcher actually wrote.
+
+## no-subject
+   record producer: wait_record "declared wait" "" external "confirm the wait still holds" ""
+   durable wake queue the supervisor receives:
+     1789870759	1	stale	test:fm-wedge	stale: test:fm-wedge (idle 600s, possible wedge, escalation 1)
+   escalation counter: 1
+
+## no-action
+   record producer: wait_record 'declared wait' 'awaiting external' external '' '/tmp/pgw-malformed.Pr77H3/anchor.status'
+   durable wake queue the supervisor receives:
+     1789870759	1	stale	test:fm-wedge	stale: test:fm-wedge (idle 600s, possible wedge, escalation 1)
+   escalation counter: 1
+
+## surplus-field
+   record producer: printf "%s\037%s\037%s\037%s\037%s\037%s" "declared wait" "awaiting external" external "confirm the wait still holds" "" extra
+   durable wake queue the supervisor receives:
+     1789870760	1	stale	test:fm-wedge	stale: test:fm-wedge (idle 601s, possible wedge, escalation 1)
+   escalation counter: 1
+
+## well-formed-control
+   record producer: wait_record 'verified wait at a parked gate' "awaiting firstmate's ask-user decision" supervisor 'decide the gate ask-user finding and relay the decision to the crewmate' ''
+   durable wake queue the supervisor receives:
+     1789870760	1	stale	test:fm-wedge	stale: test:fm-wedge (idle 600s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate
+   escalation counter: (none)
+

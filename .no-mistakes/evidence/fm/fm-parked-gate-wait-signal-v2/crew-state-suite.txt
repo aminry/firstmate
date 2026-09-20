@@ -1,0 +1,19 @@
+SUPERSEDED by this round's full run on the now-quiet host.
+The round-1 failure below was host load, not a defect: with the 36 orphaned
+`yes` load generators gone, tests/fm-crew-state.test.sh now passes all 142
+cases in 1m42s (full log: fm-crew-state.log). No timing budget was changed.
+
+--- round 1 record, kept for provenance ---
+Targeted suite runs on this host (external CPU load, see host-load note).
+
+$ bash bin/fm-test-run.sh tests/fm-crew-state.test.sh
+ok - captured AXI replacement status replays through crew-state
+ok - captured AXI parked status replays through crew-state
+ok - captured AXI failed status replays through crew-state
+  ... 80 cases passed, including the captured real-producer gate assertions above ...
+not ok - perl timeout did not bound no-mistakes calls (elapsed 6s)
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=2245005
+
+The single failure is a wall-clock budget assertion (tests/fm-crew-state.test.sh:2462,
+'elapsed < 5s' around a 1s-bounded call whose fake spins the CPU); it is unrelated to
+this change and is a symptom of the host load recorded in host-load.txt.

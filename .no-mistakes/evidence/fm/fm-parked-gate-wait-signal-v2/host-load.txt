@@ -1,0 +1,12 @@
+Host quietness at the time of this test round (the round-1 blocker was 36 orphaned
+`yes` load generators from an unrelated session holding load average near 130;
+they are gone, and both timing-sensitive suites then ran to completion):
+
+19:20  up 11 days,  7:47, 3 users, load averages: 4.25 4.52 5.75
+
+orphaned 'yes' load generators still running: 0
+
+Suite results on the quiet host, at HEAD ccfdc20:
+  tests/fm-crew-state.test.sh    exit 0, 142 cases, 1m42s  (round 1 aborted here at a 5s wall-clock assertion)
+  tests/fm-watch-triage.test.sh  exit 0, 129 cases, 20m57s (round 1 aborted here at a 10s wait_for_exit budget)
+No timing budget in either suite was relaxed, lengthened, or otherwise touched.

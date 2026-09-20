@@ -1,0 +1,14 @@
+run:
+  id: "01NEW"
+  branch: fm/competing
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: abc1234
+  head_sha: abc1234
+  pr: ""
+  findings[2]:
+    prior-1,warning,a.go,ask-user,an earlier already-resolved block
+    prior-2,info,b.go,ask-user,another earlier row
+  findings[1]{id,severity,file,action,description}:
+    r1,warning,a.go,auto-fix,the live gate is owed to the crewmate
+gate: review

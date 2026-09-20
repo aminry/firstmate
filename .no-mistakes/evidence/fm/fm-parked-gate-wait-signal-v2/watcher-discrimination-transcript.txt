@@ -1,0 +1,17 @@
+############ 1. ARMED home, gate owed a HUMAN, decision open under key nm-01RUNGATE-review
+stale: test:fm-wedge (idle 1s - verified wait at a parked gate, awaiting firstmate's ask-user decision, rechecked on a long cadence not a wedge; decide the gate's ask-user finding and relay the decision to the crewmate)
+
+############ 2. ARMED home, same gate but owed the CREWMATE's own answer (3 rounds)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 2)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+
+############ 3. UNARMED home (config/wedge-defer-parked-gate absent), human-owed gate (3 rounds)
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 1)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 2)
+stale: test:fm-wedge (idle 1s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+
+############ 4. ARMED home, human-owed gate, only an UNRELATED open decision (3 rounds)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 1)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 2)
+stale: test:fm-wedge (idle 2s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)

@@ -1,0 +1,5 @@
+The brief block the crewmate follows when it escalates an ask-user gate, generated
+by the real bin/fm-dod-lib.sh. The watcher binds the open decision to the run by
+requiring exactly this nm-<run>-<step> key shape, so the two must agree:
+
+  2:   `needs-decision [key=nm-<run>-<step>]: ask-user findings=<id1>,<id2>,... file=/tmp/pgwk.lZUciG/data/demo-task/nm-<run>-findings.txt`
