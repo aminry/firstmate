@@ -487,6 +487,32 @@ gate: review
 EOF
 }
 
+# The same crewmate-owed gate preceded by an UNBRACED `findings[N]:` block from
+# an earlier, already-resolved round. The braced header that follows is the live
+# gate's table and is the one the column index is read from, so the rows walked
+# must be that table's rows too. An earlier block carrying `ask-user` at the very
+# comma offset the braced header's `action` index resolves to is the counter-
+# example: a row scan that anchors on the looser unbraced pattern reads the wrong
+# block's rows at the right block's index, and mints the component for a gate
+# whose every action is auto-fix.
+run_parked_unbraced_findings_precursor() {  # <branch>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: fix_review
+  awaiting_agent: parked 2m10s
+  head: "${FM_FAKE_RUN_HEAD:-abc1234}"
+  pr: ""
+  findings[2]:
+    prior-1,warning,a.go,ask-user,an earlier already-resolved block
+    prior-2,info,b.go,ask-user,another earlier row
+  findings[1]{id,severity,file,action,description}:
+    r1,warning,a.go,auto-fix,the live gate is owed to the crewmate
+gate: review
+EOF
+}
+
 run_parked_scalar_gate_running() {  # <branch>
   cat <<EOF
 run:
@@ -986,6 +1012,31 @@ test_parked_human_decision_comes_from_the_action_column() {
   assert_contains "$out" "state: parked" "an unsafe findings header still reports parked"
   assert_not_contains "$out" " · ask-user: authority decision" \
     "a findings header that puts free text before action must not mint the human-decision component"
+
+  # The header and the rows must come from the SAME block. An earlier unbraced
+  # `findings[N]:` block ahead of the live gate's braced table would otherwise
+  # supply the rows while the braced header supplies the count and the `action`
+  # index, so the walk reads the wrong rows at the right index. Here that earlier
+  # block carries ask-user at exactly that offset while the live gate's only row
+  # is auto-fix: the crewmate owes this gate its own answer and must keep the
+  # wedge ladder.
+  reset_fakes
+  d=$(new_case parked-unbraced-findings-precursor)
+  make_repo_on_branch "$d/wt" fm/feat-ub
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ub.meta" "window=fm:fm-feat-ub" "worktree=$d/wt" "kind=ship"
+  printf 'needs-decision: review gate\n' > "$d/state/feat-ub.status"
+  FM_FAKE_AXI_STATUS="$(run_parked_unbraced_findings_precursor fm/feat-ub)"
+  # Non-vacuity: the payload must really carry an unbraced findings block ahead
+  # of the braced one, with the token at the offset the walk would land on.
+  assert_contains "$FM_FAKE_AXI_STATUS" "findings[2]:" \
+    "the fixture must really place an unbraced findings block before the gate's table"
+  assert_contains "$FM_FAKE_AXI_STATUS" ",ask-user," \
+    "the earlier block must carry the token where the wrong-block walk would accept it"
+  out=$(run_crew_state "$d" feat-ub)
+  assert_contains "$out" "state: parked" "an unbraced findings precursor still reports parked"
+  assert_not_contains "$out" " · ask-user: authority decision" \
+    "rows from an earlier unbraced findings block must not mint the human-decision component"
   pass "the parked human-decision component is derived from the findings table's action column"
 }
 

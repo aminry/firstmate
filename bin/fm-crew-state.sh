@@ -506,7 +506,7 @@ nm_gate_awaits_human_decision() {
   done
   [ "$idx" -gt 0 ] || return 1
   rows=$(printf '%s\n' "$RUN_OUT" \
-    | awk -v n="$count" 'f { print; if (++c >= n) exit; next } /^[[:space:]]*findings\[[0-9]+\]/ { f = 1 }')
+    | awk -v n="$count" 'f { print; if (++c >= n) exit; next } /^[[:space:]]*findings\[[0-9]+\]\{/ { f = 1 }')
   while IFS= read -r row; do
     case "$row" in *,*) ;; *) continue ;; esac
     rest=$row
