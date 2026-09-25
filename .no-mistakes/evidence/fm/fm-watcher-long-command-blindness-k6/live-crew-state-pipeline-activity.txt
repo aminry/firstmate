@@ -1,0 +1,31 @@
+## Live run on this branch (read-only):
+  id: "01M3D3Y0YWEJW9DFSP8T45G3WE"
+  branch: fm/fm-watcher-long-command-blindness-k6
+  status: running
+  head: a305f70b
+  head_sha: a305f70bfa80c3d05d2edeca6c6ccab887cd35f1
+  findings: none
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,32
+    rebase,completed,0,904
+    review,completed,0,63626
+    test,running,0,0
+    document,pending,0,0
+    lint,pending,0,0
+    push,pending,0,0
+    pr,pending,0,0
+    ci,pending,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    test,running,1m1s,1m1s,"0s ago: claude producing output","20052",starting
+  state: pipeline_owned
+  changed: false
+
+## Flag ABSENT (ls /var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T//fm-lab.g44sZZ/config):
+$ FM_HOME=$LAB bin/fm-crew-state.sh k6
+state: working · source: run-step · validating (running) · run: 01M3D3Y0YWEJW9DFSP8T45G3WE
+crew_pipeline_activity_is_recent k6 -> 1
+
+## Flag PRESENT (touch $LAB/config/wedge-defer-pipeline):
+$ FM_HOME=$LAB bin/fm-crew-state.sh k6
+state: working · source: run-step · validating (running) · pipeline-activity: recent · run: 01M3D3Y0YWEJW9DFSP8T45G3WE
+crew_pipeline_activity_is_recent k6 -> 0

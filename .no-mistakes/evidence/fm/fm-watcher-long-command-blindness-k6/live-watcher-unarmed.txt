@@ -1,0 +1,20 @@
+# UNARMED control (config/ empty), same quiet pane, same live running run; watcher state reset
+total 0
+drwxr-xr-x@  2 amin  staff   64 Sep 25 13:31 .
+drwxr-xr-x@ 22 amin  staff  704 Sep 25 13:31 ..
+=== watcher cycle 1 (13:31:23) ===
+stale: fm:fm-k6 (idle 5s, possible wedge, escalation 1)
+[watcher exit rc=0]
+=== watcher cycle 2 (13:31:37) ===
+stale: fm:fm-k6 (idle 5s, possible wedge, escalation 2)
+[watcher exit rc=0]
+=== watcher cycle 3 (13:31:43) ===
+stale: fm:fm-k6 (idle 6s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+[watcher exit rc=0]
+=== watcher cycle 4 (13:31:50) ===
+stale: fm:fm-k6 (idle 6s, possible wedge, escalation 4, demand-deep-inspection: same pane has wedge-escalated 4 times in a row - do not re-absorb on the run-step/pane state alone)
+[watcher exit rc=0]
+DONE
+state files:
+.stale-fm_fm-k6
+.wedge-escalations-fm_fm-k6

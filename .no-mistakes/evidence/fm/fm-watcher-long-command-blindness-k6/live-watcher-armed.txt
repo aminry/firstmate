@@ -1,0 +1,11 @@
+# ARMED (config/wedge-defer-pipeline present), real bin/fm-watch.sh on lab tmux socket, real bin/fm-crew-state.sh reading live run 01M3D3Y0YWEJW9DFSP8T45G3WE
+=== watcher cycle 1 (13:29:09) ===
+stale: fm:fm-k6 (idle 5s - validation step producing output, awaiting its own validation pipeline, rechecked on a long cadence not a wedge; confirm the pipeline is really progressing)
+[watcher exit rc=0]
+=== watcher cycle 2 (13:29:24) ===
+[watcher exit rc=124]
+=== watcher cycle 3 (13:30:55) ===
+state files after armed cycles:
+.stale-fm_fm-k6
+.stale-since-fm_fm-k6
+.waiting-resurfaced-fm_fm-k6
