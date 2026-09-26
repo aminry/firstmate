@@ -94,14 +94,14 @@ test_the_bound_replaces_the_calling_shell() {
   dir="$TMP_ROOT/replace"
   mkdir -p "$dir"
   for path in "$PATH" "$PERL_ONLY"; do
-    rm -f "$dir/caller" "$dir/parent"
+    rm -f "$dir/parent"
+    # Backgrounded directly, the subshell's pid is the caller being replaced.
     (
       . "$ROOT/bin/fm-timeout-lib.sh"
-      fm_exec_timed_self_pid caller || exit 1
-      printf '%s\n' "$caller" > "$dir/caller"
       PATH=$path fm_exec_timed 5 1 bash -c 'echo "$PPID" > "$1"' _ "$dir/parent"
-    ) || fail "the bounded probe failed under PATH=$path"
-    caller=$(cat "$dir/caller")
+    ) &
+    caller=$!
+    wait "$caller" || fail "the bounded probe failed under PATH=$path"
     parent=$(cat "$dir/parent")
     [ "$caller" = "$parent" ] \
       || fail "the command's parent $parent is not the replaced caller $caller under PATH=$path"
@@ -200,8 +200,8 @@ test_an_owner_that_dies_during_startup_ends_the_command() {
   PATH=$PERL_ONLY bash -c '
     . "$1/bin/fm-timeout-lib.sh"
     (
-      fm_exec_timed_self_pid watchdog || exit 1
-      echo "$watchdog" > "$2/watchdog"
+      fm_exec_timed_self_pid || exit 1
+      echo "$fm_self_pid" > "$2/watchdog"
       while kill -0 "$$" 2>/dev/null; do sleep 0.05; done
       fm_exec_timed 60 1 bash -c "exec sleep 300"
     ) >/dev/null 2>&1 &
@@ -339,13 +339,13 @@ test_the_self_pid_is_this_process_under_every_bash() {
       set -u
       . "$1/bin/fm-timeout-lib.sh"
       check() {
-        local where=$1 self truth
-        PATH=$2 fm_exec_timed_self_pid self || { echo "$where: unresolved"; return; }
+        local where=$1 fm_self_pid truth
+        PATH=$2 fm_exec_timed_self_pid || { echo "$where: unresolved"; return; }
         sleep 5 &
         truth=$(ps -o ppid= -p "$!")
         { kill "$!" && wait "$!"; } 2>/dev/null
         truth=${truth//[[:space:]]/}
-        [ "$self" = "$truth" ] || echo "$where: resolved $self, is $truth"
+        [ "$fm_self_pid" = "$truth" ] || echo "$where: resolved $fm_self_pid, is $truth"
       }
       in_function() { check "$1" "$2"; }
       check top "$2"
