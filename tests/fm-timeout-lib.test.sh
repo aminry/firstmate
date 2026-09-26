@@ -300,9 +300,33 @@ test_timed_out_names_exactly_the_bound_statuses() {
   pass "fm_timed_out accepts 124 and 137 and nothing else"
 }
 
+# Stock macOS bash 3.2 has no BASHPID, so the owner check must not read it bare
+# under set -u. Run the bound both in a subshell and as the shell's own last
+# command under every bash on the host, /bin/bash (3.2 on a stock Mac) included.
+test_the_owner_check_is_safe_without_bashpid() {
+  local sh out rc seen=0
+  for sh in /bin/bash /opt/homebrew/bin/bash "$(command -v bash)"; do
+    [ -x "$sh" ] || continue
+    seen=$((seen + 1))
+    rc=0
+    out=$(PATH=$PERL_ONLY "$sh" -c '
+      set -u
+      . "$1/bin/fm-timeout-lib.sh"
+      (fm_exec_timed 5 1 bash -c "echo sub; exit 3"); [ "$?" -eq 3 ] || exit 41
+      fm_exec_timed 5 1 bash -c "echo top; exit 4"
+    ' _ "$ROOT" 2>&1) || rc=$?
+    [ "$rc" -eq 4 ] || fail "$sh: fm_exec_timed died (rc=$rc): $out"
+    assert_contains "$out" "top" "$sh: the bounded command did not run at top level"
+    case "$out" in *unbound*) fail "$sh: unbound variable in fm_exec_timed: $out" ;; esac
+  done
+  [ "$seen" -gt 0 ] || fail "no bash found to run the owner check"
+  pass "fm_exec_timed's owner check works without BASHPID"
+}
+
 test_passes_the_command_status_and_output_through
 test_term_ends_a_cooperative_command_at_the_bound
 test_kill_ends_a_term_ignoring_command_after_the_grace
+test_the_owner_check_is_safe_without_bashpid
 test_the_bound_replaces_the_calling_shell
 test_a_descendant_holding_the_output_cannot_outlast_the_bound
 test_a_signal_to_the_bounding_process_reaches_the_command
