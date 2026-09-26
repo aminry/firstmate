@@ -97,7 +97,8 @@ test_the_bound_replaces_the_calling_shell() {
     rm -f "$dir/caller" "$dir/parent"
     (
       . "$ROOT/bin/fm-timeout-lib.sh"
-      printf '%s\n' "$BASHPID" > "$dir/caller"
+      fm_exec_timed_self_pid caller || exit 1
+      printf '%s\n' "$caller" > "$dir/caller"
       PATH=$path fm_exec_timed 5 1 bash -c 'echo "$PPID" > "$1"' _ "$dir/parent"
     ) || fail "the bounded probe failed under PATH=$path"
     caller=$(cat "$dir/caller")
@@ -199,7 +200,8 @@ test_an_owner_that_dies_during_startup_ends_the_command() {
   PATH=$PERL_ONLY bash -c '
     . "$1/bin/fm-timeout-lib.sh"
     (
-      echo "$BASHPID" > "$2/watchdog"
+      fm_exec_timed_self_pid watchdog || exit 1
+      echo "$watchdog" > "$2/watchdog"
       while kill -0 "$$" 2>/dev/null; do sleep 0.05; done
       fm_exec_timed 60 1 bash -c "exec sleep 300"
     ) >/dev/null 2>&1 &
@@ -317,13 +319,50 @@ test_the_owner_check_is_safe_without_bashpid() {
     ' _ "$ROOT" 2>&1) || rc=$?
     [ "$rc" -eq 4 ] || fail "$sh: fm_exec_timed died (rc=$rc): $out"
     assert_contains "$out" "top" "$sh: the bounded command did not run at top level"
-    case "$out" in *unbound*) fail "$sh: unbound variable in fm_exec_timed: $out" ;; esac
+    case "$out" in *unbound* | *"not found"*) fail "$sh: fm_exec_timed's owner check failed: $out" ;; esac
   done
   [ "$seen" -gt 0 ] || fail "no bash found to run the owner check"
   pass "fm_exec_timed's owner check works without BASHPID"
 }
 
+# The owner check compares the owner against this process's own pid, which
+# Bash 3.2 cannot read from BASHPID. Resolve it at top level, in a subshell,
+# and in a function in each, under a PATH with no sh, and compare it with the
+# parent pid ps reports for a background child of the same process.
+test_the_self_pid_is_this_process_under_every_bash() {
+  local sh out rc seen=0
+  for sh in /bin/bash /opt/homebrew/bin/bash "$(command -v bash)"; do
+    [ -x "$sh" ] || continue
+    seen=$((seen + 1))
+    rc=0
+    out=$("$sh" -c '
+      set -u
+      . "$1/bin/fm-timeout-lib.sh"
+      check() {
+        local where=$1 self truth
+        PATH=$2 fm_exec_timed_self_pid self || { echo "$where: unresolved"; return; }
+        sleep 5 &
+        truth=$(ps -o ppid= -p "$!")
+        { kill "$!" && wait "$!"; } 2>/dev/null
+        truth=${truth//[[:space:]]/}
+        [ "$self" = "$truth" ] || echo "$where: resolved $self, is $truth"
+      }
+      in_function() { check "$1" "$2"; }
+      check top "$2"
+      in_function top-function "$2"
+      (check subshell "$2")
+      (in_function subshell-function "$2")
+      (: ; (check nested-subshell "$2"))
+    ' _ "$ROOT" "$PERL_ONLY" 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || fail "$sh: resolving the pid failed (rc=$rc): $out"
+    [ -z "$out" ] || fail "$sh: the resolved pid is not this process: $out"
+  done
+  [ "$seen" -gt 0 ] || fail "no bash found to resolve the pid"
+  pass "fm_exec_timed_self_pid names this process under every bash, in and out of subshells"
+}
+
 test_passes_the_command_status_and_output_through
+test_the_self_pid_is_this_process_under_every_bash
 test_term_ends_a_cooperative_command_at_the_bound
 test_kill_ends_a_term_ignoring_command_after_the_grace
 test_the_owner_check_is_safe_without_bashpid

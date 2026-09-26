@@ -185,6 +185,23 @@ fm_timed_out() {  # <status>
   return 1
 }
 
+# fm_exec_timed_self_pid <variable>: set <variable> to this process's own pid,
+# which inside a subshell is not $$. Bash 3.2 has no BASHPID, and a command
+# substitution would run the probe in a forked subshell of its own, so a child
+# shell started directly by this process writes its PPID to a file instead.
+fm_exec_timed_self_pid() {  # <variable>
+  local tmp pid=${BASHPID:-}
+  if [ -z "$pid" ]; then
+    tmp=$(command -p mktemp "${TMPDIR:-/tmp}/fm-exec-timed-pid.XXXXXX" 2>/dev/null) || return 1
+    # shellcheck disable=SC2016 # the child shell expands its own PPID
+    command -p sh -c 'echo "$PPID"' >"$tmp"
+    read -r pid <"$tmp" || pid=
+    command -p rm -f "$tmp"
+  fi
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+  printf -v "$1" '%s' "$pid"
+}
+
 # The perl watchdog forks the command into its own process group (both sides
 # call setpgid, so the group exists before either can signal it) and polls
 # waitpid(WNOHANG) against wall-clock deadlines rather than using alarm+die,
@@ -206,10 +223,7 @@ fm_exec_timed() {  # <seconds> <grace-seconds> <command...>
     exit 125
   fi
   owner=${FM_EXEC_TIMED_OWNER_PID:-$$}
-  # Bash 3.2 has no BASHPID and $$ stays the parent shell's pid inside a
-  # subshell, so ask a child shell for its parent: that is this process.
-  self=${BASHPID:-}
-  [ -n "$self" ] || self=$(sh -c 'echo $PPID')
+  fm_exec_timed_self_pid self || self=
   [ "$owner" != "$self" ] || owner=$PPID
   unset FM_EXEC_TIMED_OWNER_PID
   if command -v perl >/dev/null 2>&1; then
