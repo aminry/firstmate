@@ -1,0 +1,16 @@
+== variant noexec: tests/zz-nm-noexec.sh (TMPDIR=/tmp/nm-td-noexec.Ypo4)
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state/parent-route/ios.git-hooks/pre-push: Permission denied
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state/parent-route/ios.git-hooks/post-merge: Permission denied
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state/parent-route/ios.git-hooks/pre-commit: Permission denied
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state/parent-route/ios.git-hooks: Directory not empty
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state/parent-route: Directory not empty
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home/state: Directory not empty
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a/remote-home: Directory not empty
+rm: /private/tmp/nm-td-noexec.Ypo4/fm-remote-secondmate-e2e.wc665a: Directory not empty
+exit=1
+-- fixture temp roots left under TMPDIR immediately after exit:
+fm-remote-secondmate-e2e.wc665a
+-- processes still carrying this run's fixture root 5s after exit:
+leaked_process_count=0
+-- fixture temp roots under TMPDIR 5s after exit (recreated by a leaked writer?):
+fm-remote-secondmate-e2e.wc665a
