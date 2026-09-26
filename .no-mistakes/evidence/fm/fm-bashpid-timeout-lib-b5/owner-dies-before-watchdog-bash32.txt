@@ -1,0 +1,3 @@
+### Adversarial: top-level fm_exec_timed under /bin/bash 3.2.57(1)-release; owner dies before the watchdog reads getppid
+HEAD (fix): bounded command ended 2s after its owner died (owner check live; deadline was 20s)
+counterfactual $(sh -c 'echo $PPID'): bounded command STILL RUNNING 12s after its owner died (owner check disabled)

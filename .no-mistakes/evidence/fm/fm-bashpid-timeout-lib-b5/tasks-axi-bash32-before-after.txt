@@ -1,0 +1,22 @@
+### Scenario: 'tasks-axi start' (move to In flight) through fm_exec_timed, as fm-spawn's bounded fm_tasks_axi does, under /bin/bash 3.2.57(1)-release
+--- base lib (30ef650)
+/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/tmp.7x34505Eus/base-lib.sh: line 209: BASHPID: unbound variable
+outer rc=1
+state after:
+task:
+  id: demo-a1
+  title: demo task
+  state: queued
+  blocked: no
+--- fixed lib (HEAD)
+ok: start demo-a1 -> In flight
+help[1]:
+  - Run `tasks-axi done demo-a1 --pr <url> --file=/var/folders/wl/vj3pkxrj1y53bnydd3h_c68w0000gn/T/tmp.7x34505Eus/BACKLOG.md` when it ships
+status=0
+outer rc=0
+state after:
+task:
+  id: demo-a1
+  title: demo task
+  state: in_flight
+  blocked: no
